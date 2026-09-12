@@ -1,18 +1,20 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Biometric verification</title>
-</head>
-<body>
-    <main>
-        <h1>Biometric verification</h1>
-        {% if webauthn_verified %}<p>Your device verification is complete.</p>{% else %}<p>Complete device verification to continue.</p><a href="{% url 'accounts:webauthn_authentication' %}">Verify with device security</a>{% endif %}
+{% extends "base.html" %}
+{% block title %}Device verification | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+        <span class="auth-icon" aria-hidden="true">⌁</span>
+        <h1>Device verification</h1>
+        {% if webauthn_verified %}
+            <p>Your device verification is complete.</p>
+            <div class="status-panel"><span class="secure-indicator"><span class="status-dot"></span>Verified</span></div>
+        {% else %}
+            <p>Complete device verification to continue to the voter dashboard.</p>
+            <div class="security-note"><span aria-hidden="true">⌁</span><span>Your device may use fingerprint, face recognition, a PIN, or another local method. SecureVote never receives that biometric data.</span></div>
+            <a class="button form-submit" href="{% url 'accounts:webauthn_authentication' %}">Verify with device security</a>
+        {% endif %}
         <form method="post" action="{% url 'accounts:logout' %}">
             {% csrf_token %}
-            <button type="submit">Logout</button>
+            <button class="button button-outline form-submit" type="submit">Logout</button>
         </form>
-    </main>
-</body>
-</html>
+    </div></div></section>
+{% endblock %}

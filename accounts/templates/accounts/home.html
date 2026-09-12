@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}SecureVote | Secure online voting{% endblock %}
+{% block body_class %}home-body{% endblock %}
+
+{% block content %}
+<section class="hero-section">
+    <div class="page-container hero-grid">
+        <div class="hero-copy">
+            <span class="eyebrow">Secure digital participation</span>
+            <h1>Voting that is secure, clear, and built for confidence.</h1>
+            <p class="hero-lead">SecureVote provides a focused online voting experience with account controls, device-based verification, and protected ballot handling.</p>
+            <div class="hero-actions">
+                {% if user.is_authenticated %}
+                    <a class="button button-large" href="{% url dashboard_url %}">Dashboard</a>
+                    <form method="post" action="{% url 'accounts:logout' %}">
+                        {% csrf_token %}
+                        <button class="button button-outline button-large" type="submit">Logout</button>
+                    </form>
+                {% else %}
+                    <a class="button button-large" href="{% url 'accounts:login' %}">Login securely</a>
+                    <a class="button button-outline button-large" href="{% url 'accounts:register' %}">Register as a voter</a>
+                {% endif %}
+            </div>
+        </div>
+        <aside class="hero-panel" aria-label="SecureVote security summary">
+            <div class="secure-indicator"><span class="status-dot"></span>Protected voting journey</div>
+            <div class="hero-icon" aria-hidden="true">⌁</div>
+            <h2>Designed around verified access</h2>
+            <p>Device authentication happens through the operating system or authenticator. SecureVote does not collect raw biometric images or templates.</p>
+        </aside>
+    </div>
+</section>
+
+<section class="section-space">
+    <div class="page-container">
+        <div class="section-heading">
+            <span class="eyebrow">Security by design</span>
+            <h2>Every step has a clear purpose.</h2>
+        </div>
+        <div class="feature-grid">
+            <article class="info-card"><span class="card-icon" aria-hidden="true">⌂</span><h3>Secure Authentication</h3><p>Account access is paired with platform-based device verification when required.</p></article>
+            <article class="info-card"><span class="card-icon" aria-hidden="true">▣</span><h3>Encrypted Voting</h3><p>Ballot data is handled through the system’s protected voting workflow.</p></article>
+            <article class="info-card"><span class="card-icon" aria-hidden="true">①</span><h3>One Person, One Vote</h3><p>Eligibility checks help ensure each verified voter can cast only one ballot.</p></article>
+            <article class="info-card"><span class="card-icon" aria-hidden="true">↗</span><h3>Real-Time Results</h3><p>Published election results are available through the authorised results view.</p></article>
+        </div>
+    </div>
+</section>
+
+<section class="how-section">
+    <div class="page-container">
+        <div class="section-heading centered-heading">
+            <span class="eyebrow">A simple process</span>
+            <h2>How SecureVote works</h2>
+        </div>
+        <ol class="steps-grid">
+            <li><span class="step-number">1</span><h3>Register</h3><p>Create your voter account with your required details.</p></li>
+            <li><span class="step-number">2</span><h3>Verify securely</h3><p>Use your device’s supported platform authentication.</p></li>
+            <li><span class="step-number">3</span><h3>Cast your vote</h3><p>Select and confirm your choice during an active election.</p></li>
+            <li><span class="step-number">4</span><h3>View results</h3><p>Review available published election results.</p></li>
+        </ol>
+    </div>
+</section>
+{% endblock %}

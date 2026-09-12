@@ -1,28 +1,22 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Login</title>
-</head>
-<body>
-    <main>
-        <h1>Login</h1>
-        <form method="post" novalidate>
+{% extends "base.html" %}
+{% block title %}Login | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+        <span class="auth-icon" aria-hidden="true">⌁</span>
+        <h1>Welcome back</h1>
+        <p>Sign in to continue to the appropriate SecureVote journey.</p>
+        <form method="post" novalidate class="auth-form">
             {% csrf_token %}
-            {{ form.non_field_errors }}
+            {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
             {% for field in form %}
-                <p>
-                    {{ field.label_tag }}<br>
+                <div class="field-group">
+                    {{ field.label_tag }}
                     {{ field }}
-                    {% for error in field.errors %}
-                        <span>{{ error }}</span>
-                    {% endfor %}
-                </p>
+                    {% if field.errors %}<span class="field-error">{{ field.errors }}</span>{% endif %}
+                </div>
             {% endfor %}
-            <button type="submit">Login</button>
+            <button class="button form-submit" type="submit">Login securely</button>
         </form>
-        <p><a href="{% url 'accounts:register' %}">Register as a voter</a></p>
-    </main>
-</body>
-</html>
+        <p class="auth-links">New to SecureVote? <a href="{% url 'accounts:register' %}">Register as a voter</a></p>
+    </div></div></section>
+{% endblock %}

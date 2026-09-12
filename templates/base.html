@@ -1,1 +1,55 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}Online Voting System{% endblock %}</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"></head><body class="bg-light"><nav class="navbar navbar-dark bg-primary"><div class="container"><a class="navbar-brand" href="/">Online Voting System</a>{% if user.is_authenticated %}<form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button class="btn btn-outline-light btn-sm">Logout</button></form>{% endif %}</div></nav><main class="container py-4">{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}{% block content %}{% endblock %}</main>{% block scripts %}{% endblock %}</body></html>
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SecureVote{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/site.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="app-body {% block body_class %}{% endblock %}">
+    <nav class="site-nav" aria-label="Primary navigation">
+        <div class="page-container nav-content">
+            <a class="brand" href="{% url 'home' %}" aria-label="SecureVote home">
+                <span class="brand-mark" aria-hidden="true">✓</span>
+                <span>SecureVote</span>
+            </a>
+            <div class="nav-actions">
+                {% if user.is_authenticated %}
+                    {% if user.is_staff or user.role.name == 'Admin' %}
+                        <a class="nav-link" href="{% url 'elections:dashboard' %}">Dashboard</a>
+                    {% else %}
+                        <a class="nav-link" href="{% url 'accounts:biometric_entry' %}">Dashboard</a>
+                    {% endif %}
+                    <form method="post" action="{% url 'accounts:logout' %}">
+                        {% csrf_token %}
+                        <button class="button button-ghost button-small" type="submit">Logout</button>
+                    </form>
+                {% else %}
+                    <a class="nav-link" href="{% url 'accounts:login' %}">Login</a>
+                    <a class="button button-small" href="{% url 'accounts:register' %}">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    <main class="site-main">
+        {% if messages %}
+            <div class="page-container message-stack">
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">
+        <div class="page-container footer-content">
+            <span class="brand brand-footer"><span class="brand-mark" aria-hidden="true">✓</span>SecureVote</span>
+            <span>Secure online voting with device-based authentication.</span>
+        </div>
+    </footer>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

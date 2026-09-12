@@ -41,6 +41,20 @@ def registration_success(request):
     return render(request, "accounts/registration_success.html")
 
 
+def home(request):
+    """Render the public landing page without changing authentication state."""
+    if request.user.is_authenticated:
+        if request.user.is_staff or request.user.role.name == "Admin":
+            dashboard_url = "elections:dashboard"
+        else:
+            # The biometric entry view keeps the existing server-side WebAuthn
+            # gate in place and redirects verified voters to their dashboard.
+            dashboard_url = "accounts:biometric_entry"
+    else:
+        dashboard_url = None
+    return render(request, "accounts/home.html", {"dashboard_url": dashboard_url})
+
+
 def get_client_ip(request):
     """Return the client IP address without trusting more than the first proxy value."""
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")

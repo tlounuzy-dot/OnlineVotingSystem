@@ -1,11 +1,20 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Verify device security</title></head><body><main>
-<h1>Verify device security</h1><p id="status" role="status">Preparing device verification…</p>
-{% if authentication_allowed %}<button id="verify" type="button">Verify with this device</button>{% else %}<p>No active device credential is registered for this account.</p>{% endif %}
-</main>{% if authentication_allowed %}<script>
+{% extends "base.html" %}
+{% block title %}Verify device security | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+<span class="auth-icon" aria-hidden="true">⌁</span>
+<h1>Verify device security</h1>
+<p>Use a registered device credential to continue. Verification takes place locally on your device.</p>
+<div class="status-panel"><p id="status" role="status">Preparing device verification…</p>
+{% if authentication_allowed %}<button class="button form-submit" id="verify" type="button">Verify with this device</button>{% else %}<p class="field-error">No active device credential is registered for this account.</p>{% endif %}
+</div>
+</div></div></section>
+{% endblock %}
+{% block scripts %}{% if authentication_allowed %}<script>
 const csrf=document.cookie.split('; ').find(x=>x.startsWith('csrftoken='))?.split('=')[1], status=document.querySelector('#status'), button=document.querySelector('#verify');
 const bytes=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const encode=c=>({id:c.id,rawId:b64(c.rawId),type:c.type,response:{clientDataJSON:b64(c.response.clientDataJSON),authenticatorData:b64(c.response.authenticatorData),signature:b64(c.response.signature),userHandle:c.response.userHandle?b64(c.response.userHandle):null},clientExtensionResults:c.getClientExtensionResults()});
 if(!window.PublicKeyCredential){status.textContent='WebAuthn is unavailable in this browser.';button.disabled=true;} else status.textContent='Ready to verify with your device.';
 button.onclick=async()=>{try{button.disabled=true;status.textContent='Requesting device verification…';let r=await fetch('{% url "accounts:webauthn_authentication_options" %}',{method:'POST',headers:{'X-CSRFToken':csrf}}),d=await r.json();if(!r.ok)throw Error(d.error);let o=d.publicKey;o.challenge=bytes(o.challenge);o.allowCredentials?.forEach(x=>x.id=bytes(x.id));const c=await navigator.credentials.get({publicKey:o});r=await fetch('{% url "accounts:webauthn_authentication_verify" %}',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({challenge_id:d.challenge_id,credential:encode(c)})});d=await r.json();if(!r.ok)throw Error(d.error);status.textContent='Device verification succeeded.';location.assign(d.next);}catch(e){status.textContent=e.name==='NotAllowedError'?'Verification was cancelled or timed out.':(e.message||'Verification could not be completed.');button.disabled=false;}};
-</script>{% endif %}</body></html>
+</script>{% endif %}{% endblock %}

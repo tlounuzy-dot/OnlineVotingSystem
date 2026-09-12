@@ -1,1 +1,30 @@
-{% extends 'base.html' %}{% block content %}<h1>Welcome, {{ voter.user.full_name }}</h1><p class="text-muted">Account status: {{ voter.get_status_display }} · Device verification complete</p><div class="d-flex gap-2 mb-3"><a class="btn btn-outline-primary" href="{% url 'reports:voter_results' %}">Results</a></div><h2 class="h4">Available elections</h2>{% for election in active_elections %}<div class="card mb-2"><div class="card-body"><h3 class="h5">{{ election.title }}</h3><p>{{ election.description }}</p>{% if election.pk in voted_ids %}<span class="badge text-bg-success">Vote recorded</span>{% else %}<a class="btn btn-primary" href="{% url 'voting:ballot' election.pk %}">Vote now</a>{% endif %}</div></div>{% empty %}<p>No elections are currently available.</p>{% endfor %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Voter dashboard | SecureVote{% endblock %}
+{% block content %}
+<section class="voter-page">
+    <div class="page-container">
+        <div class="voter-hero">
+            <div><span class="eyebrow">Voter dashboard</span><h1>Welcome, {{ voter.user.full_name }}</h1><p>Review your available elections and account security status.</p></div>
+            <a class="button button-outline" href="{% url 'reports:voter_results' %}">View results</a>
+        </div>
+        <div class="voter-status-grid">
+            <article class="status-card"><span class="card-icon" aria-hidden="true">✓</span><div><span class="status-label">Account status</span><strong>{{ voter.get_status_display }}</strong><span class="status-pill status-success">Voter account verified</span></div></article>
+            <article class="status-card"><span class="card-icon" aria-hidden="true">⌁</span><div><span class="status-label">Device security</span><strong>Verification complete</strong><span class="status-copy">Required before protected voting actions.</span></div></article>
+            <article class="status-card"><span class="card-icon" aria-hidden="true">▣</span><div><span class="status-label">Voting status</span><strong>{{ active_elections|length }} active election{{ active_elections|length|pluralize }}</strong><span class="status-copy">Only currently open elections appear below.</span></div></article>
+        </div>
+        <div class="section-heading dashboard-heading"><span class="eyebrow">Current elections</span><h2>Available to vote</h2></div>
+        <div class="election-grid">
+            {% for election in active_elections %}
+                <article class="election-card">
+                    <div class="election-card-top"><span class="status-pill status-active">Open for voting</span><span class="election-date">Ends {{ election.end_date|date:"d M Y, H:i" }}</span></div>
+                    <h3>{{ election.title }}</h3>
+                    {% if election.description %}<p>{{ election.description }}</p>{% else %}<p>No additional election description is available.</p>{% endif %}
+                    {% if election.pk in voted_ids %}<span class="status-pill status-success">Vote recorded</span>{% else %}<a class="button" href="{% url 'voting:ballot' election.pk %}">Vote now</a>{% endif %}
+                </article>
+            {% empty %}
+                <div class="empty-state"><span class="auth-icon" aria-hidden="true">□</span><h3>No elections are currently available.</h3><p>When an election is open for voting, it will appear here.</p><a class="button button-outline" href="{% url 'reports:voter_results' %}">View published results</a></div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

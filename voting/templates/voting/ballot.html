@@ -1,1 +1,17 @@
-{% extends 'base.html' %}{% block content %}<h1>{{ election.title }}</h1><p>Select one active candidate. Your vote is submitted only after confirmation.</p><form method="post" action="{% url 'voting:choose' election.pk %}">{% csrf_token %}{% for candidate in candidates %}<label class="card d-block mb-2 p-3"><input type="radio" name="candidate" value="{{ candidate.pk }}" required> <strong>{{ candidate.full_name }}</strong> — {{ candidate.party }}<span class="d-block text-muted">{{ candidate.manifesto }}</span></label>{% empty %}<p>No candidates are available.</p>{% endfor %}<button class="btn btn-primary" {% if not candidates %}disabled{% endif %}>Continue to confirmation</button><a class="btn btn-link" href="{% url 'elections:voter_dashboard' %}">Cancel</a></form>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Select a candidate | SecureVote{% endblock %}
+{% block content %}
+<section class="voter-page"><div class="page-container ballot-container">
+    <a class="back-link" href="{% url 'elections:voter_dashboard' %}">← Back to dashboard</a>
+    <div class="ballot-heading"><span class="eyebrow">Official ballot</span><h1>{{ election.title }}</h1>{% if election.description %}<p>{{ election.description }}</p>{% endif %}<div class="ballot-meta"><span class="status-pill status-active">Open for voting</span><span>Voting closes {{ election.end_date|date:"d M Y, H:i" }}</span></div></div>
+    <div class="vote-warning"><span aria-hidden="true">!</span><p>Select one candidate. Your vote is submitted only after confirmation, and a submitted vote cannot be changed.</p></div>
+    <form method="post" action="{% url 'voting:choose' election.pk %}" class="ballot-form">{% csrf_token %}
+        <fieldset><legend>Choose your candidate</legend><div class="candidate-grid">
+            {% for candidate in candidates %}
+                <label class="candidate-card"><input class="candidate-input" type="radio" name="candidate" value="{{ candidate.pk }}" required><span class="candidate-choice" aria-hidden="true"></span><span class="candidate-body"><span class="candidate-avatar" aria-hidden="true">{{ candidate.full_name|first|upper }}</span><span><strong>{{ candidate.full_name }}</strong><span class="candidate-party">{{ candidate.party }}</span>{% if candidate.manifesto %}<span class="candidate-manifesto">{{ candidate.manifesto }}</span>{% endif %}</span></span><span class="candidate-select">Select</span></label>
+            {% empty %}<div class="empty-state"><h3>No candidates are available.</h3><p>Please return to the dashboard.</p></div>{% endfor %}
+        </div></fieldset>
+        <div class="ballot-actions"><button class="button button-large" {% if not candidates %}disabled{% endif %}>Continue to confirmation</button><a class="button button-outline button-large" href="{% url 'elections:voter_dashboard' %}">Cancel</a></div>
+    </form>
+</div></section>
+{% endblock %}

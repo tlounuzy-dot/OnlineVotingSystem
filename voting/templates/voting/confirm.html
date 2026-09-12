@@ -1,1 +1,9 @@
-{% extends 'base.html' %}{% block content %}<h1>Confirm your vote</h1><div class="card"><div class="card-body"><p><strong>Election:</strong> {{ election.title }}</p><p><strong>Candidate:</strong> {{ candidate.full_name }} — {{ candidate.party }}</p><p class="text-danger">Once submitted, your vote cannot be changed.</p><form method="post" action="{% url 'voting:submit' election.pk %}">{% csrf_token %}<button class="btn btn-danger">Confirm and submit vote</button><a class="btn btn-link" href="{% url 'voting:ballot' election.pk %}">Back</a></form></div></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Confirm your vote | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card confirmation-card"><span class="auth-icon" aria-hidden="true">✓</span><span class="eyebrow">Final confirmation</span><h1>Confirm your vote</h1><p>Please review your selected candidate before submitting your vote.</p>
+    <div class="selection-summary"><span class="status-label">Election</span><strong>{{ election.title }}</strong><hr><span class="status-label">Selected candidate</span><strong>{{ candidate.full_name }}</strong><span>{{ candidate.party }}</span></div>
+    <div class="vote-warning"><span aria-hidden="true">!</span><p>Your vote will be securely submitted. Once submitted, it cannot be changed.</p></div>
+    <form method="post" action="{% url 'voting:submit' election.pk %}" class="confirmation-actions">{% csrf_token %}<button class="button button-large" type="submit">Confirm vote</button><a class="button button-outline button-large" href="{% url 'voting:ballot' election.pk %}">Cancel</a></form>
+</div></div></section>
+{% endblock %}

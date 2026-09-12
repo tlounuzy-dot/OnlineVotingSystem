@@ -11,7 +11,14 @@ class VoterRegistrationForm(forms.Form):
     email = forms.EmailField()
     id_number = forms.CharField(max_length=20, label="ID number")
     date_of_birth = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
-    gender = forms.CharField(max_length=10, required=False)
+    gender = forms.ChoiceField(
+        choices=(
+            ("", "Select gender"),
+            ("Female", "Female"),
+            ("Male", "Male"),
+        ),
+        required=False,
+    )
     phone = forms.CharField(max_length=20, required=False)
     address = forms.CharField(max_length=255, required=False, widget=forms.Textarea(attrs={"rows": 3}))
     password = forms.CharField(widget=forms.PasswordInput)

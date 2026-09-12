@@ -34,6 +34,16 @@
             </div>
         </div>
     </nav>
+    {% if user.is_authenticated and user.is_staff or user.is_authenticated and user.role.name == 'Admin' %}
+        <nav class="admin-nav" aria-label="Admin navigation">
+            <div class="page-container admin-nav-content">
+                <span class="admin-context">Admin</span>
+                <div class="admin-nav-links">
+                    <a href="{% url 'elections:dashboard' %}">Dashboard</a><a href="{% url 'elections:list' %}">Elections</a><a href="{% url 'elections:candidate_list' %}">Candidates</a><a href="{% url 'accounts:voter_list' %}">Voters</a><a href="{% url 'reports:admin_results' %}">Results</a><a href="{% url 'reports:report_list' %}">Reports</a><a href="{% url 'reports:audit_logs' %}">Audit logs</a>
+                </div>
+            </div>
+        </nav>
+    {% endif %}
     <main class="site-main">
         {% if messages %}
             <div class="page-container message-stack">

@@ -1,13 +1,15 @@
 import base64
 import hashlib
 import json
+import re
 from datetime import timedelta
 from unittest.mock import patch
 
 import cbor2
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
@@ -53,6 +55,8 @@ class VoterRegistrationTests(TestCase):
         self.assertEqual(user.status, get_user_model().Status.PENDING)
         self.assertEqual(voter.status, Voter.Status.PENDING)
         self.assertEqual(voter.id_number, self.data["id_number"])
+        self.assertNotEqual(user.password, self.data["password"])
+        self.assertTrue(user.check_password(self.data["password"]))
 
     def test_duplicate_email_is_rejected(self):
         self.client.post(self.url, self.data)
@@ -120,6 +124,14 @@ class LoginAuthenticationTests(TestCase):
         self.assertEqual(self.client.session["_auth_user_id"], str(self.user.pk))
         attempt = self.user.login_attempts.get()
         self.assertEqual(attempt.status, attempt.Status.SUCCESS)
+
+    def test_eligible_voter_without_a_credential_is_sent_to_device_registration(self):
+        self.client.post(self.url, self.data)
+
+        response = self.client.get(reverse("accounts:biometric_entry"))
+
+        self.assertContains(response, reverse("accounts:webauthn_registration"))
+        self.assertNotContains(response, reverse("accounts:webauthn_authentication"))
 
     def test_invalid_password_is_rejected_and_logged(self):
         response = self.client.post(self.url, self.data | {"password": "WrongPassword!99"})
@@ -199,6 +211,69 @@ class LoginAuthenticationTests(TestCase):
         response = self.client.post(self.url, {"email": admin.email, "password": "CorrectHorse!42Car"})
 
         self.assertRedirects(response, reverse("elections:dashboard"))
+
+    def test_pending_voter_with_correct_password_sees_clear_pending_message(self):
+        self.user.status = get_user_model().Status.PENDING
+        self.user.save(update_fields=["status"])
+        self.voter.status = Voter.Status.PENDING
+        self.voter.save(update_fields=["status"])
+
+        response = self.client.post(self.url, self.data)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "pending approval", status_code=403)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertEqual(self.user.login_attempts.get().status, LoginAttempt.Status.SUCCESS)
+        self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 302)
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class PasswordResetTests(TestCase):
+    def setUp(self):
+        self.role = Role.objects.create(name="Voter")
+        self.user = get_user_model().objects.create_user(
+            email="reset-voter@example.test", password="OldPassword!42",
+            full_name="Reset Voter", role=self.role, status=get_user_model().Status.PENDING,
+        )
+        self.voter = Voter.objects.create(
+            user=self.user, id_number="RESET-1", date_of_birth="2000-01-01",
+            status=Voter.Status.PENDING,
+        )
+
+    def test_reset_request_page_loads_without_email_enumeration(self):
+        url = reverse("accounts:password_reset")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        known = self.client.post(url, {"email": self.user.email})
+        self.assertRedirects(known, reverse("accounts:password_reset_done"))
+        self.assertEqual(len(mail.outbox), 1)
+        unknown = self.client.post(url, {"email": "unknown@example.test"})
+        self.assertRedirects(unknown, reverse("accounts:password_reset_done"))
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_valid_reset_changes_only_password_and_preserves_voter_security_state(self):
+        self.client.post(reverse("accounts:password_reset"), {"email": self.user.email})
+        match = re.search(r"http://testserver(/reset/[^\s]+)", mail.outbox[0].body)
+        self.assertIsNotNone(match)
+        reset_url = match.group(1)
+        reset_page = self.client.get(reset_url, follow=True)
+        self.assertEqual(reset_page.status_code, 200)
+        response = self.client.post(reset_page.wsgi_request.path, {
+            "new_password1": "NewPassword!42", "new_password2": "NewPassword!42",
+        })
+        self.assertRedirects(response, reverse("accounts:password_reset_complete"))
+        self.user.refresh_from_db()
+        self.voter.refresh_from_db()
+        self.assertIsNone(authenticate(email=self.user.email, password="OldPassword!42"))
+        self.assertEqual(authenticate(email=self.user.email, password="NewPassword!42"), self.user)
+        self.assertEqual(self.user.role, self.role)
+        self.assertEqual(self.user.status, get_user_model().Status.PENDING)
+        self.assertEqual(self.voter.status, Voter.Status.PENDING)
+        self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 302)
+
+    def test_invalid_reset_token_is_rejected_safely(self):
+        response = self.client.get(reverse("accounts:password_reset_confirm", args=["invalid", "invalid-token"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "invalid or has already been used")
 
 
 class WebAuthnCredentialModelTests(TestCase):

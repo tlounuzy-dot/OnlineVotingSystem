@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Account pending approval | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon" aria-hidden="true">⌂</span>
+    <h1>Your account is pending approval</h1>
+    <p>Your password was accepted, but your voter account has not yet been approved for SecureVote access.</p>
+    <div class="security-note"><span aria-hidden="true">⌁</span><span>Approval and device verification remain required before any protected voter action is available.</span></div>
+    <p class="auth-links"><a href="{% url 'accounts:login' %}">Return to login</a></p>
+</div></div></section>
+{% endblock %}

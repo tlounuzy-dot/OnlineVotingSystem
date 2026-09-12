@@ -72,11 +72,24 @@ def login_view(request):
             identified_user = User.objects.filter(email__iexact=email).first()
             authenticated_user = authenticate(request, email=email, password=password)
 
-            if (
-                authenticated_user is not None
-                and authenticated_user.is_active
-                and authenticated_user.status == User.Status.ACTIVE
-            ):
+            if authenticated_user is not None and authenticated_user.is_active:
+                if authenticated_user.status == User.Status.PENDING:
+                    LoginAttempt.objects.create(
+                        user=authenticated_user, ip_address=get_client_ip(request),
+                        status=LoginAttempt.Status.SUCCESS,
+                        failure_reason="Account is pending approval.",
+                    )
+                    return render(request, "accounts/account_pending.html", status=403)
+
+                if authenticated_user.status != User.Status.ACTIVE:
+                    LoginAttempt.objects.create(
+                        user=authenticated_user, ip_address=get_client_ip(request),
+                        status=LoginAttempt.Status.FAILED,
+                        failure_reason="Account is unavailable.",
+                    )
+                    form.add_error(None, "This account is unavailable.")
+                    return render(request, "accounts/login.html", {"form": form})
+
                 login(request, authenticated_user)
                 LoginAttempt.objects.create(
                     user=authenticated_user,
@@ -109,8 +122,12 @@ def biometric_entry(request):
         return redirect("accounts:login")
     if voter_id is not None and request.session.get("webauthn_verified_voter_id") == voter_id:
         return redirect("elections:voter_dashboard")
+    has_active_credential = WebAuthnCredential.objects.filter(
+        voter_id=voter_id, status=WebAuthnCredential.Status.ACTIVE
+    ).exists()
     return render(request, "accounts/biometric_entry.html", {
         "webauthn_verified": request.session.get("webauthn_verified_voter_id") == voter_id,
+        "has_active_credential": has_active_credential,
     })
 
 

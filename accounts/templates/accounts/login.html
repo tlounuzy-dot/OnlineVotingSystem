@@ -17,6 +17,7 @@
             {% endfor %}
             <button class="button form-submit" type="submit">Login securely</button>
         </form>
+        <p class="auth-links"><a href="{% url 'accounts:password_reset' %}">Forgot password?</a></p>
         <p class="auth-links">New to SecureVote? <a href="{% url 'accounts:register' %}">Register as a voter</a></p>
     </div></div></section>
 {% endblock %}

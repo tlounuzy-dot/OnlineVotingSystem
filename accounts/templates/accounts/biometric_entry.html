@@ -10,7 +10,11 @@
         {% else %}
             <p>Complete device verification to continue to the voter dashboard.</p>
             <div class="security-note"><span aria-hidden="true">⌁</span><span>Your device may use fingerprint, face recognition, a PIN, or another local method. SecureVote never receives that biometric data.</span></div>
-            <a class="button form-submit" href="{% url 'accounts:webauthn_authentication' %}">Verify with device security</a>
+            {% if has_active_credential %}
+                <a class="button form-submit" href="{% url 'accounts:webauthn_authentication' %}">Verify with device security</a>
+            {% else %}
+                <a class="button form-submit" href="{% url 'accounts:webauthn_registration' %}">Set up device security</a>
+            {% endif %}
         {% endif %}
         <form method="post" action="{% url 'accounts:logout' %}">
             {% csrf_token %}

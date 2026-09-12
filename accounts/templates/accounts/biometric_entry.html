@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Biometric verification</title>
+</head>
+<body>
+    <main>
+        <h1>Biometric verification</h1>
+        {% if webauthn_verified %}<p>Your device verification is complete.</p>{% else %}<p>Complete device verification to continue.</p><a href="{% url 'accounts:webauthn_authentication' %}">Verify with device security</a>{% endif %}
+        <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button type="submit">Logout</button>
+        </form>
+    </main>
+</body>
+</html>

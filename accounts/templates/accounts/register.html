@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voter registration</title>
+</head>
+<body>
+    <main>
+        <h1>Voter registration</h1>
+        <p>Complete your details to create a voter account. Biometric verification is completed later.</p>
+
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            {% for field in form %}
+                <p>
+                    {{ field.label_tag }}<br>
+                    {{ field }}
+                    {% for error in field.errors %}
+                        <span>{{ error }}</span>
+                    {% endfor %}
+                </p>
+            {% endfor %}
+            <button type="submit">Register</button>
+        </form>
+    </main>
+</body>
+</html>

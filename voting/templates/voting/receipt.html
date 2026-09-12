@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<div class="alert alert-success"><h1 class="h3">Vote recorded</h1><p>Your vote for {{ election.title }} was securely recorded. Your selection is not shown on this receipt.</p></div><a class="btn btn-primary" href="{% url 'elections:voter_dashboard' %}">Return to dashboard</a>{% endblock %}

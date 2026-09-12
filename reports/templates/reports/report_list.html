@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<h1>Reports</h1><a href="{% url 'reports:export_csv' %}">Export CSV</a><table><tr><th>Election</th><th>Status</th><th>Votes</th></tr>{% for item in participation %}<tr><td>{{ item.election.title }}</td><td>{{ item.election.calculated_status }}</td><td>{{ item.votes }}</td></tr>{% endfor %}</table>{% endblock %}

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Device security setup</title></head>
+<body><main>
+<h1>Register device security</h1>
+{% if registration_allowed %}
+<p>Register your device's biometric or security authentication. Your device may use fingerprint, face recognition, PIN, or another platform authenticator; this site never receives biometric data.</p>
+<p id="status" role="status">Checking device support…</p><button id="register" type="button" disabled>Register this device</button>
+{% else %}<p>This account is not eligible to register a device credential.</p>{% endif %}
+</main>{% if registration_allowed %}<script>
+const csrf=document.cookie.split('; ').find(x=>x.startsWith('csrftoken='))?.split('=')[1];
+const status=document.querySelector('#status'), button=document.querySelector('#register');
+const bytes=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const encode=c=>({id:c.id,rawId:b64(c.rawId),type:c.type,authenticatorAttachment:c.authenticatorAttachment,response:{clientDataJSON:b64(c.response.clientDataJSON),attestationObject:b64(c.response.attestationObject),transports:c.response.getTransports?.()||[]},clientExtensionResults:c.getClientExtensionResults()});
+if (!window.PublicKeyCredential) status.textContent='WebAuthn is unavailable in this browser.'; else PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(ok=>{status.textContent=ok?'Your device supports secure platform verification.':'A platform authenticator is unavailable on this device.';button.disabled=!ok;});
+button.onclick=async()=>{try{button.disabled=true;status.textContent='Requesting secure device registration…';let r=await fetch('{% url "accounts:webauthn_registration_options" %}',{method:'POST',headers:{'X-CSRFToken':csrf}}),d=await r.json();if(!r.ok)throw Error(d.error);let o=d.publicKey;o.challenge=bytes(o.challenge);o.user.id=bytes(o.user.id);o.excludeCredentials?.forEach(x=>x.id=bytes(x.id));let c=await navigator.credentials.create({publicKey:o});r=await fetch('{% url "accounts:webauthn_registration_verify" %}',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({challenge_id:d.challenge_id,credential:encode(c)})});d=await r.json();if(!r.ok)throw Error(d.error);status.textContent='Device credential registered successfully.';}catch(e){status.textContent=e.name==='NotAllowedError'?'Registration was cancelled or timed out.':(e.message||'Registration could not be completed.');button.disabled=false;}};
+</script>{% endif %}</body></html>

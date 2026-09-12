@@ -98,6 +98,12 @@ class LoginAuthenticationTests(TestCase):
             role=self.role,
             status=get_user_model().Status.ACTIVE,
         )
+        self.voter = Voter.objects.create(
+            user=self.user,
+            id_number="LOGIN-TEST-1",
+            date_of_birth="2000-01-01",
+            status=Voter.Status.VERIFIED,
+        )
         self.url = reverse("accounts:login")
         self.data = {"email": self.user.email, "password": "CorrectHorse!42Car"}
 

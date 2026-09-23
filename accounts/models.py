@@ -7,6 +7,7 @@ from django.db import models
 from django.utils import timezone
 
 from .fields import WebAuthnCredentialIDField
+from .eligibility import validate_voter_age
 
 from .managers import UserManager
 
@@ -42,7 +43,9 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["full_name", "role"]
+    # Superusers always receive the application Admin role in UserManager;
+    # exposing a ForeignKey here makes createsuperuser prompt for a raw ID.
+    REQUIRED_FIELDS = ["full_name"]
     objects = UserManager()
 
     class Meta:
@@ -73,8 +76,11 @@ class Voter(models.Model):
         ordering = ["user__full_name"]
 
     def clean(self):
-        if self.date_of_birth and self.date_of_birth >= date.today():
-            raise ValidationError({"date_of_birth": "Date of birth must be in the past."})
+        if self.date_of_birth:
+            try:
+                validate_voter_age(self.date_of_birth)
+            except ValidationError as error:
+                raise ValidationError({"date_of_birth": error.messages})
 
     def __str__(self):
         return f"{self.user.full_name} ({self.id_number})"
@@ -283,6 +289,48 @@ class LoginAttempt(models.Model):
     def __str__(self):
         user_label = self.user.email if self.user else "Unknown user"
         return f"{user_label}: {self.get_status_display()}"
+
+
+class ContactVerificationCode(models.Model):
+    """Single-use, hashed contact-verification code.
+
+    The raw six-digit value is intentionally never persisted.  A consumed record
+    is retained as a minimal audit trail that a particular contact channel was
+    verified; it does not alter voter approval or WebAuthn state.
+    """
+
+    class Purpose(models.TextChoices):
+        REGISTRATION_VERIFICATION = "registration", "Registration verification"
+        PASSWORD_RESET = "password_reset", "Password reset"
+
+    class Channel(models.TextChoices):
+        EMAIL = "email", "Email"
+        SMS = "sms", "SMS"
+        WHATSAPP = "whatsapp", "WhatsApp"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="contact_codes")
+    purpose = models.CharField(max_length=32, choices=Purpose.choices)
+    channel = models.CharField(max_length=16, choices=Channel.choices)
+    contact_digest = models.CharField(
+        max_length=64,
+        help_text="SHA-256 digest of the normalized delivery destination; never the OTP.",
+    )
+    code_hash = models.CharField(max_length=255, help_text="Salted password-style hash of the OTP.")
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    invalidated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "purpose", "created_at"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_purpose_display()} via {self.get_channel_display()} for user {self.user_id}"
 
 
 class AuditLog(models.Model):

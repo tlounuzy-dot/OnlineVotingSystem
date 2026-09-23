@@ -1,9 +1,11 @@
 from django import forms
 from django.contrib.auth import password_validation
+from django.contrib.auth.forms import SetPasswordForm
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from .models import Role, User, Voter
+from .eligibility import validate_voter_age
 
 
 class VoterRegistrationForm(forms.Form):
@@ -38,11 +40,10 @@ class VoterRegistrationForm(forms.Form):
 
     def clean_date_of_birth(self):
         date_of_birth = self.cleaned_data["date_of_birth"]
-        voter = Voter(date_of_birth=date_of_birth)
         try:
-            voter.clean()
+            validate_voter_age(date_of_birth)
         except ValidationError as error:
-            raise ValidationError(error.message_dict["date_of_birth"])
+            raise error
         return date_of_birth
 
     def clean(self):
@@ -81,6 +82,7 @@ class VoterRegistrationForm(forms.Form):
                 full_name=self.cleaned_data["full_name"],
                 role=voter_role,
                 status=User.Status.PENDING,
+                is_active=False,
             )
             voter = Voter(
                 user=user,
@@ -100,3 +102,42 @@ class VoterRegistrationForm(forms.Form):
 class EmailLoginForm(forms.Form):
     email = forms.EmailField()
     password = forms.CharField(widget=forms.PasswordInput)
+
+
+class VerificationChannelForm(forms.Form):
+    channel = forms.ChoiceField(
+        choices=(),
+        widget=forms.RadioSelect,
+        label="How should we send your verification code?",
+    )
+
+    def __init__(self, *args, channels=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["channel"].choices = [
+            (channel, label) for channel, label in (channels or {}).items()
+        ]
+
+
+class OTPCodeForm(forms.Form):
+    code = forms.CharField(
+        label="Six-digit verification code",
+        min_length=6,
+        max_length=6,
+        widget=forms.TextInput(attrs={
+            "inputmode": "numeric", "autocomplete": "one-time-code", "pattern": "[0-9]{6}",
+        }),
+    )
+
+    def clean_code(self):
+        code = self.cleaned_data["code"].strip()
+        if not code.isdigit() or len(code) != 6:
+            raise ValidationError("Enter the six-digit verification code.")
+        return code
+
+
+class PasswordRecoveryRequestForm(forms.Form):
+    email = forms.EmailField(label="Email address")
+
+
+class SecureVoteSetPasswordForm(SetPasswordForm):
+    """Named wrapper retaining Django's full password-validation behavior."""

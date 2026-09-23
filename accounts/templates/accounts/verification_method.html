@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon" aria-hidden="true">⌁</span>
+    <h1>{{ heading }}</h1><p>{{ intro }}</p>
+    <form method="post" class="auth-form otp-method-form">{% csrf_token %}
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        {% for choice in form.channel %}<label class="channel-choice">{{ choice.tag }}<span>{{ choice.choice_label }}</span></label>{% endfor %}
+        {% if form.channel.errors %}<span class="field-error">{{ form.channel.errors }}</span>{% endif %}
+        <button class="button form-submit" type="submit">Send verification code</button>
+    </form>
+    <div class="security-note"><span aria-hidden="true">⌁</span><span>Verification confirms a contact method only. It does not approve voter eligibility or replace device verification.</span></div>
+</div></div></section>
+{% endblock %}

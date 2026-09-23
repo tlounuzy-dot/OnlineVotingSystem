@@ -2,8 +2,8 @@ import base64
 import hashlib
 import json
 import re
-from datetime import timedelta
-from unittest.mock import patch
+from datetime import date, timedelta
+from unittest.mock import ANY, patch
 
 import cbor2
 from cryptography.hazmat.primitives import hashes, serialization
@@ -17,7 +17,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import AuditLog, LoginAttempt, Role, Voter, WebAuthnChallenge, WebAuthnCredential
+from .models import AuditLog, ContactVerificationCode, LoginAttempt, Role, Voter, WebAuthnChallenge, WebAuthnCredential
+from .otp import DeliveryUnavailable, issue_code, normalize_phone_number, verify_code
+from .eligibility import calculate_age
 
 
 class RoleInitializationTests(TestCase):
@@ -27,6 +29,43 @@ class RoleInitializationTests(TestCase):
 
         self.assertEqual(Role.objects.filter(name="Admin").count(), 1)
         self.assertEqual(Role.objects.filter(name="Voter").count(), 1)
+
+
+class SuperuserCreationTests(TestCase):
+    def test_create_superuser_resolves_one_admin_role_and_authenticates(self):
+        admin_role = Role.objects.create(name="Admin", description="Existing admin role.")
+
+        user = get_user_model().objects.create_superuser(
+            email="superuser@example.test", password="SuperuserPassword!42",
+            full_name="SecureVote Administrator",
+        )
+
+        self.assertEqual(user.role, admin_role)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_active)
+        self.assertEqual(user.status, get_user_model().Status.ACTIVE)
+        self.assertNotEqual(user.password, "SuperuserPassword!42")
+        self.assertTrue(user.check_password("SuperuserPassword!42"))
+        self.assertEqual(Role.objects.filter(name="Admin").count(), 1)
+        self.assertEqual(
+            authenticate(email=user.email, password="SuperuserPassword!42"), user
+        )
+
+        response = self.client.post(reverse("accounts:login"), {
+            "email": user.email, "password": "SuperuserPassword!42",
+        })
+        self.assertRedirects(response, reverse("elections:dashboard"))
+
+    def test_create_superuser_creates_admin_role_when_roles_are_not_seeded(self):
+        user = get_user_model().objects.create_superuser(
+            email="first-superuser@example.test", password="SuperuserPassword!42",
+            full_name="First Administrator",
+        )
+
+        self.assertEqual(user.role.name, "Admin")
+        self.assertEqual(Role.objects.filter(name="Admin").count(), 1)
+        self.assertEqual(get_user_model().REQUIRED_FIELDS, ["full_name"])
 
 
 class VoterRegistrationTests(TestCase):
@@ -48,12 +87,13 @@ class VoterRegistrationTests(TestCase):
     def test_successful_registration_creates_pending_voter_account(self):
         response = self.client.post(self.url, self.data)
 
-        self.assertRedirects(response, reverse("accounts:registration_success"))
+        self.assertRedirects(response, reverse("accounts:registration_verification_method"))
         user = get_user_model().objects.get(email=self.data["email"])
         voter = Voter.objects.get(user=user)
         self.assertEqual(user.role.name, "Voter")
         self.assertEqual(user.status, get_user_model().Status.PENDING)
         self.assertEqual(voter.status, Voter.Status.PENDING)
+        self.assertFalse(user.is_active)
         self.assertEqual(voter.id_number, self.data["id_number"])
         self.assertNotEqual(user.password, self.data["password"])
         self.assertTrue(user.check_password(self.data["password"]))
@@ -90,6 +130,68 @@ class VoterRegistrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(get_user_model().objects.count(), 0)
         self.assertEqual(Voter.objects.count(), 0)
+
+
+class PublicWorkflowSessionTests(TestCase):
+    def setUp(self):
+        self.admin_role = Role.objects.create(name="Admin")
+        self.voter_role = Role.objects.create(name="Voter")
+        self.admin = get_user_model().objects.create_user(
+            email="workflow-admin@example.test", password="CorrectHorse!42Car", full_name="Workflow Admin",
+            role=self.admin_role, status=get_user_model().Status.ACTIVE, is_staff=True,
+        )
+        self.voter = get_user_model().objects.create_user(
+            email="workflow-voter@example.test", password="CorrectHorse!42Car", full_name="Workflow Voter",
+            role=self.voter_role, status=get_user_model().Status.PENDING, is_active=False,
+        )
+        Voter.objects.create(
+            user=self.voter, id_number="WORKFLOW-1", date_of_birth="2000-01-01", status=Voter.Status.PENDING,
+        )
+
+    def test_logged_in_admin_must_log_out_before_registration_and_public_nav_has_no_admin_links(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("accounts:register"))
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "Log out to continue", status_code=409)
+        self.assertNotContains(response, "Audit logs", status_code=409)
+        self.assertNotContains(response, "Elections", status_code=409)
+        before = get_user_model().objects.count()
+        response = self.client.post(reverse("accounts:register"), {
+            "full_name": "Attempted Voter", "email": "attempt@example.test", "id_number": "WORKFLOW-2",
+            "date_of_birth": "2000-01-01", "gender": "", "phone": "", "address": "",
+            "password": "CorrectHorse!42Car", "password_confirmation": "CorrectHorse!42Car",
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(get_user_model().objects.count(), before)
+
+    def test_registration_otp_cannot_inherit_admin_session_or_grant_admin_role(self):
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["registration_verification_user_id"] = self.voter.pk
+        session.save()
+        response = self.client.get(reverse("accounts:registration_verification_code"))
+        self.assertEqual(response.status_code, 409)
+        self.assertNotContains(response, "Admin", status_code=409)
+        self.voter.refresh_from_db()
+        self.assertEqual(self.voter.role.name, "Voter")
+        self.assertFalse(self.voter.is_staff)
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.admin.pk))
+        self.assertNotEqual(self.client.session["_auth_user_id"], str(self.voter.pk))
+
+    def test_anonymous_registration_and_normal_admin_dashboard_remain_available(self):
+        anonymous = self.client_class()
+        self.assertEqual(anonymous.get(reverse("accounts:register")).status_code, 200)
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(reverse("elections:dashboard")).status_code, 200)
+
+    def test_voter_cannot_access_admin_management_routes(self):
+        self.voter.status = get_user_model().Status.ACTIVE
+        self.voter.is_active = True
+        self.voter.save(update_fields=["status", "is_active"])
+        self.voter.voter_profile.status = Voter.Status.VERIFIED
+        self.voter.voter_profile.save(update_fields=["status"])
+        self.client.force_login(self.voter)
+        self.assertEqual(self.client.get(reverse("accounts:voter_list")).status_code, 403)
 
 
 class LoginAuthenticationTests(TestCase):
@@ -227,8 +329,12 @@ class LoginAuthenticationTests(TestCase):
         self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 302)
 
 
-@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-class PasswordResetTests(TestCase):
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    OTP_RESEND_COOLDOWN_SECONDS=0,
+    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+)
+class ContactVerificationTests(TestCase):
     def setUp(self):
         self.role = Role.objects.create(name="Voter")
         self.user = get_user_model().objects.create_user(
@@ -240,24 +346,105 @@ class PasswordResetTests(TestCase):
             status=Voter.Status.PENDING,
         )
 
-    def test_reset_request_page_loads_without_email_enumeration(self):
-        url = reverse("accounts:password_reset")
-        self.assertEqual(self.client.get(url).status_code, 200)
-        known = self.client.post(url, {"email": self.user.email})
-        self.assertRedirects(known, reverse("accounts:password_reset_done"))
-        self.assertEqual(len(mail.outbox), 1)
-        unknown = self.client.post(url, {"email": "unknown@example.test"})
-        self.assertRedirects(unknown, reverse("accounts:password_reset_done"))
-        self.assertEqual(len(mail.outbox), 1)
+    def _issue(self, purpose, channel="email", code="123456"):
+        with patch("accounts.otp._new_code", return_value=code):
+            return issue_code(self.user, purpose, channel)
 
-    def test_valid_reset_changes_only_password_and_preserves_voter_security_state(self):
+    def test_registration_code_is_hashed_valid_and_does_not_approve_voter(self):
+        record, _ = self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION)
+        self.assertNotEqual(record.code_hash, "123456")
+        self.assertNotIn("123456", record.code_hash)
+        self.assertTrue(verify_code(self.user, record.purpose, "123456").valid)
+        record.refresh_from_db()
+        self.assertIsNotNone(record.used_at)
+        self.user.refresh_from_db(); self.voter.refresh_from_db()
+        self.assertEqual(self.user.status, get_user_model().Status.PENDING)
+        self.assertEqual(self.voter.status, Voter.Status.PENDING)
+
+    def test_invalid_expired_reused_and_attempt_limited_codes_are_rejected(self):
+        record, _ = self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION)
+        self.assertFalse(verify_code(self.user, record.purpose, "000000").valid)
+        self.assertTrue(verify_code(self.user, record.purpose, "123456").valid)
+        self.assertFalse(verify_code(self.user, record.purpose, "123456").valid)
+        expired, _ = self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET)
+        ContactVerificationCode.objects.filter(pk=expired.pk).update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertIn("expired", verify_code(self.user, expired.purpose, "123456").reason)
+        locked, _ = self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION)
+        for _ in range(5):
+            verify_code(self.user, locked.purpose, "000000")
+        self.assertIn("No active", verify_code(self.user, locked.purpose, "123456").reason)
+
+    def test_resend_invalidates_previous_code_and_email_is_delivered(self):
+        first, _ = self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, code="111111")
+        second, _ = self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, code="222222")
+        first.refresh_from_db()
+        self.assertIsNotNone(first.invalidated_at)
+        self.assertTrue(verify_code(self.user, second.purpose, "222222").valid)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn("222222", mail.outbox[-1].body)
+        self.assertIn("This code expires in 5 minutes.", mail.outbox[-1].body)
+        self.assertIn("If you did not request this code", mail.outbox[-1].body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend",
+        DEFAULT_FROM_EMAIL="securevote@example.test",
+    )
+    def test_email_otp_uses_configured_django_backend_without_exposing_credentials(self):
+        with patch("accounts.otp.send_mail", return_value=1) as send:
+            self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, code="333333")
+        args, kwargs = send.call_args
+        self.assertEqual(args[0], "Your SecureVote verification code")
+        self.assertEqual(args[2], "securevote@example.test")
+        self.assertEqual(args[3], [self.user.email])
+        self.assertFalse(kwargs["fail_silently"])
+        self.assertNotIn("EMAIL_HOST_PASSWORD", " ".join(str(value) for value in args))
+
+    def test_registration_flow_activates_after_contact_verification_but_still_requires_webauthn(self):
+        self.client.post(reverse("accounts:register"), {
+            "full_name": "OTP Voter", "email": "otp-register@example.test", "id_number": "OTP-REGISTER-1",
+            "date_of_birth": "2000-01-01", "gender": "", "phone": "", "address": "",
+            "password": "CorrectHorse!42Car", "password_confirmation": "CorrectHorse!42Car",
+        })
+        user = get_user_model().objects.get(email="otp-register@example.test")
+        with patch("accounts.otp._new_code", return_value="123456"):
+            response = self.client.post(reverse("accounts:registration_verification_method"), {"channel": "email"})
+        self.assertRedirects(response, reverse("accounts:registration_verification_code"))
+        response = self.client.post(reverse("accounts:registration_verification_code"), {"code": "123456"})
+        self.assertRedirects(response, reverse("accounts:registration_success"))
+        user.refresh_from_db()
+        self.assertEqual(user.status, get_user_model().Status.ACTIVE)
+        self.assertTrue(user.is_active)
+        self.assertEqual(user.voter_profile.status, Voter.Status.VERIFIED)
+        login_response = self.client.post(reverse("accounts:login"), {
+            "email": user.email, "password": "CorrectHorse!42Car",
+        })
+        self.assertRedirects(login_response, reverse("accounts:biometric_entry"))
+        self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 403)
+        audit_text = " ".join(AuditLog.objects.filter(user=user).values_list("description", flat=True))
+        self.assertNotIn("123456", audit_text)
+        self.assertTrue(AuditLog.objects.filter(user=user, action="registration_contact_code_sent").exists())
+        self.assertTrue(AuditLog.objects.filter(user=user, action="voter_auto_activated").exists())
+
+    def test_password_recovery_request_does_not_enumerate_accounts(self):
+        known = self.client.post(reverse("accounts:password_reset"), {"email": self.user.email})
+        self.assertRedirects(known, reverse("accounts:password_reset_method"))
+        known_page = self.client.get(reverse("accounts:password_reset_method"))
+        self.assertEqual(known_page.status_code, 200)
+        other = self.client_class()
+        unknown = other.post(reverse("accounts:password_reset"), {"email": "unknown@example.test"})
+        self.assertRedirects(unknown, reverse("accounts:password_reset_method"))
+        unknown_page = other.get(reverse("accounts:password_reset_method"))
+        self.assertContains(unknown_page, "Choose a recovery method")
+        self.assertContains(known_page, "Choose a recovery method")
+
+    def test_valid_password_reset_otp_changes_only_password_and_preserves_security_state(self):
         self.client.post(reverse("accounts:password_reset"), {"email": self.user.email})
-        match = re.search(r"http://testserver(/reset/[^\s]+)", mail.outbox[0].body)
-        self.assertIsNotNone(match)
-        reset_url = match.group(1)
-        reset_page = self.client.get(reset_url, follow=True)
-        self.assertEqual(reset_page.status_code, 200)
-        response = self.client.post(reset_page.wsgi_request.path, {
+        with patch("accounts.otp._new_code", return_value="123456"):
+            response = self.client.post(reverse("accounts:password_reset_method"), {"channel": "email"})
+        self.assertRedirects(response, reverse("accounts:password_reset_code"))
+        response = self.client.post(reverse("accounts:password_reset_code"), {"code": "123456"})
+        self.assertRedirects(response, reverse("accounts:password_reset_new_password"))
+        response = self.client.post(reverse("accounts:password_reset_new_password"), {
             "new_password1": "NewPassword!42", "new_password2": "NewPassword!42",
         })
         self.assertRedirects(response, reverse("accounts:password_reset_complete"))
@@ -270,10 +457,130 @@ class PasswordResetTests(TestCase):
         self.assertEqual(self.voter.status, Voter.Status.PENDING)
         self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 302)
 
-    def test_invalid_reset_token_is_rejected_safely(self):
-        response = self.client.get(reverse("accounts:password_reset_confirm", args=["invalid", "invalid-token"]))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "invalid or has already been used")
+    @override_settings(TWILIO_ACCOUNT_SID="sid", TWILIO_AUTH_TOKEN="token", TWILIO_SMS_FROM_NUMBER="+27110000000", TWILIO_WHATSAPP_FROM_NUMBER="whatsapp:+27110000000")
+    def test_sms_and_whatsapp_use_provider_boundary_when_configured(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        with patch("accounts.otp._send_twilio_otp") as send:
+            self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
+            self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, "whatsapp")
+        self.assertEqual(send.call_count, 2)
+        send.assert_any_call("sms", "+27712345678", ANY, ContactVerificationCode.Purpose.PASSWORD_RESET)
+        send.assert_any_call("whatsapp", "+27712345678", ANY, ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION)
+
+    def test_south_african_phone_normalization_and_provider_failure_are_safe(self):
+        self.assertEqual(normalize_phone_number("071 234 5678"), "+27712345678")
+        self.assertEqual(normalize_phone_number("27712345678"), "+27712345678")
+        with patch("accounts.otp.send_otp", side_effect=RuntimeError("provider failure")):
+            with self.assertRaises(DeliveryUnavailable):
+                self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET)
+        record = ContactVerificationCode.objects.get(purpose=ContactVerificationCode.Purpose.PASSWORD_RESET)
+        self.assertIsNotNone(record.invalidated_at)
+
+    def test_registration_delivery_failure_is_generic_and_keeps_channel_selection_available(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        session = self.client.session
+        session["registration_verification_user_id"] = self.user.pk
+        session.save()
+        response = self.client.post(reverse("accounts:registration_verification_method"), {"channel": "sms"})
+        self.assertContains(response, "verification code using that method")
+        self.assertNotContains(response, "not configured")
+        self.assertContains(response, "+27 ****** 678")
+
+    def test_missing_sms_credentials_fail_gracefully_without_sending(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        with self.assertRaises(DeliveryUnavailable):
+            self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
+        self.assertFalse(ContactVerificationCode.objects.filter(channel="sms", invalidated_at__isnull=True).exists())
+
+
+class VoterAgeEligibilityTests(TestCase):
+    def setUp(self):
+        Role.objects.create(name="Voter")
+        self.url = reverse("accounts:register")
+
+    @staticmethod
+    def _years_ago(years):
+        today = date.today()
+        try:
+            return today.replace(year=today.year - years)
+        except ValueError:  # 29 February in a non-leap target year
+            return today.replace(year=today.year - years, day=28)
+
+    def _data(self, dob, *, email="age-voter@example.test", id_number="AGE-1001"):
+        return {
+            "full_name": "Age Test Voter", "email": email, "id_number": id_number,
+            "date_of_birth": dob.isoformat() if isinstance(dob, date) else dob,
+            "gender": "", "phone": "", "address": "",
+            "password": "CorrectHorse!42Car", "password_confirmation": "CorrectHorse!42Car",
+        }
+
+    def test_exactly_eighteen_today_is_eligible_and_proceeds_to_contact_verification(self):
+        dob = self._years_ago(18)
+        self.assertEqual(calculate_age(dob), 18)
+        response = self.client.post(self.url, self._data(dob))
+        self.assertRedirects(response, reverse("accounts:registration_verification_method"))
+        user = get_user_model().objects.get(email="age-voter@example.test")
+        self.assertEqual(user.status, get_user_model().Status.PENDING)
+        self.assertFalse(user.is_active)
+
+    def test_eighteenth_birthday_tomorrow_and_obvious_underage_dates_are_rejected_without_records(self):
+        almost_eighteen = self._years_ago(18) + timedelta(days=1)
+        response = self.client.post(self.url, self._data(almost_eighteen))
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Registration not eligible", status_code=400)
+        self.assertEqual(get_user_model().objects.count(), 0)
+        response = self.client.post(self.url, self._data(self._years_ago(12), email="young@example.test", id_number="AGE-1002"))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(get_user_model().objects.count(), 0)
+        self.assertEqual(Voter.objects.count(), 0)
+
+    def test_older_voter_is_eligible_and_future_or_malformed_dates_are_rejected(self):
+        response = self.client.post(self.url, self._data(self._years_ago(30)))
+        self.assertRedirects(response, reverse("accounts:registration_verification_method"))
+        future = self.client.post(self.url, self._data(date.today() + timedelta(days=1), email="future@example.test", id_number="AGE-1003"))
+        self.assertContains(future, "Date of birth must be in the past.")
+        malformed = self.client.post(self.url, self._data("not-a-date", email="bad@example.test", id_number="AGE-1004"))
+        self.assertContains(malformed, "Enter a valid date.")
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", OTP_RESEND_COOLDOWN_SECONDS=0)
+    def test_suspended_voter_cannot_be_automatically_reactivated_by_contact_code(self):
+        response = self.client.post(self.url, self._data(self._years_ago(24)))
+        self.assertRedirects(response, reverse("accounts:registration_verification_method"))
+        user = get_user_model().objects.get(email="age-voter@example.test")
+        with patch("accounts.otp._new_code", return_value="123456"):
+            self.client.post(reverse("accounts:registration_verification_method"), {"channel": "email"})
+        user.status = get_user_model().Status.SUSPENDED; user.is_active = False
+        user.save(update_fields=["status", "is_active"])
+        user.voter_profile.status = Voter.Status.REJECTED; user.voter_profile.save(update_fields=["status"])
+        response = self.client.post(reverse("accounts:registration_verification_code"), {"code": "123456"})
+        self.assertRedirects(response, reverse("accounts:register"))
+        user.refresh_from_db(); user.voter_profile.refresh_from_db()
+        self.assertEqual(user.status, get_user_model().Status.SUSPENDED)
+        self.assertEqual(user.voter_profile.status, Voter.Status.REJECTED)
+
+    def test_administrator_can_still_manage_voter_status(self):
+        voter_role = Role.objects.get(name="Voter")
+        voter_user = get_user_model().objects.create_user(
+            email="managed-voter@example.test", password="CorrectHorse!42Car", full_name="Managed Voter",
+            role=voter_role, status=get_user_model().Status.PENDING, is_active=False,
+        )
+        voter = Voter.objects.create(
+            user=voter_user, id_number="AGE-MANAGED-1", date_of_birth=self._years_ago(25),
+            status=Voter.Status.PENDING,
+        )
+        admin_role = Role.objects.create(name="Admin")
+        admin = get_user_model().objects.create_user(
+            email="status-admin@example.test", password="CorrectHorse!42Car", full_name="Status Admin",
+            role=admin_role, status=get_user_model().Status.ACTIVE, is_active=True, is_staff=True,
+        )
+        self.client.force_login(admin)
+        response = self.client.post(reverse("accounts:voter_status", args=[voter.pk]), {"status": Voter.Status.VERIFIED})
+        self.assertRedirects(response, reverse("accounts:voter_list"))
+        voter.refresh_from_db(); voter_user.refresh_from_db()
+        self.assertEqual(voter.status, Voter.Status.VERIFIED)
+        self.assertEqual(voter_user.status, get_user_model().Status.ACTIVE)
+        self.assertTrue(voter_user.is_active)
 
 
 class WebAuthnCredentialModelTests(TestCase):
@@ -483,6 +790,7 @@ class WebAuthnAuthenticationSecurityTests(TestCase):
         response = self._verify(self._assertion(challenge_id, credential, private_key, counter=5))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["next"], reverse("accounts:biometric_entry"))
         self.assertEqual(self.client.session["webauthn_verified_voter_id"], self.voter.pk)
         self.assertNotEqual(self.client.session.session_key, session_key)
         challenge = WebAuthnChallenge.objects.get(challenge_id=challenge_id)

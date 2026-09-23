@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon" aria-hidden="true">⌁</span>
+    <h1>{{ heading }}</h1><p>Enter the six-digit code sent to <strong>{{ destination }}</strong>. It expires after five minutes.</p>
+    <form method="post" class="auth-form">{% csrf_token %}
+        <div class="field-group otp-field">{{ form.code.label_tag }}{{ form.code }}{% if form.code.errors %}<span class="field-error">{{ form.code.errors }}</span>{% endif %}</div>
+        <button class="button form-submit" type="submit">Verify code</button>
+    </form>
+    <form method="post" action="{{ resend_url }}" class="resend-form">{% csrf_token %}<button class="text-button" type="submit">Resend code</button></form>
+    <div class="security-note"><span aria-hidden="true">⌁</span><span>For your security, codes are single-use and verification attempts are limited.</span></div>
+</div></div></section>
+{% endblock %}

@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -56,6 +57,27 @@ def election_transition(request, pk, status):
     if status in allowed and election.status in allowed[status] and not (status == "active" and not election.start_date <= timezone.now() < election.end_date):
         election.status = status; election.save(update_fields=["status"]); audit(request, "election_status_changed")
     else: messages.error(request, "That election status transition is not allowed.")
+    return redirect("elections:detail", pk=pk)
+
+
+@admin_required
+@require_POST
+def election_publish_results(request, pk):
+    with transaction.atomic():
+        election = get_object_or_404(Election.objects.select_for_update(), pk=pk)
+        if election.calculated_status != Election.Status.CLOSED:
+            messages.error(request, "Results can be published only after the election has closed.")
+        elif election.results_are_published:
+            messages.info(request, "These results have already been published.")
+        else:
+            # Recalculate immediately before publication so the stored snapshot
+            # represents the final set of valid recorded votes.
+            from voting.views import _record_results
+            _record_results(election)
+            election.results_published_at = timezone.now()
+            election.save(update_fields=["results_published_at"])
+            audit(request, "election_results_published")
+            messages.success(request, "Final results have been published to voters.")
     return redirect("elections:detail", pk=pk)
 
 

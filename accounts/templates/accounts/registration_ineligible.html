@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Registration not eligible | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon ineligible-icon" aria-hidden="true">!</span>
+    <h1>Registration not eligible</h1>
+    <p>SecureVote requires voters to be at least 18 years old. According to the date of birth entered, you are not currently eligible to register.</p>
+    <p class="auth-links"><a class="button" href="{% url 'accounts:register' %}">Return to registration</a></p>
+</div></div></section>
+{% endblock %}

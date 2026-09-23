@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Log out to continue | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon" aria-hidden="true">⌁</span>
+    <h1>Log out to continue</h1>
+    <p>For account security, sign out of the current account before starting registration, signing in as another user, or recovering a password.</p>
+    <form method="post" action="{% url 'accounts:logout' %}" class="auth-form">{% csrf_token %}<button class="button form-submit" type="submit">Log out securely</button></form>
+    <p class="auth-links"><a href="{% url 'home' %}">Return to SecureVote home</a></p>
+</div></div></section>
+{% endblock %}

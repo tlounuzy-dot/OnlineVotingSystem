@@ -12,6 +12,7 @@
                 <div class="field-group">
                     {{ field.label_tag }}
                     {{ field }}
+                    {% if field.name == "date_of_birth" %}<small class="field-help">Voters must be 18 years or older. Eligibility is verified securely from your date of birth.</small>{% endif %}
                     {% if field.errors %}<span class="field-error">{{ field.errors }}</span>{% endif %}
                 </div>
             {% endfor %}

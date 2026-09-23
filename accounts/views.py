@@ -1,13 +1,16 @@
+from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 import hashlib
 import hmac
 import json
+import logging
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
+from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -16,21 +19,55 @@ from webauthn import (base64url_to_bytes, generate_authentication_options,
                       verify_authentication_response, verify_registration_response)
 from webauthn.helpers.structs import AuthenticatorAttachment, AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, UserVerificationRequirement
 
-from .forms import EmailLoginForm, VoterRegistrationForm
-from .models import AuditLog, LoginAttempt, User, Voter, WebAuthnChallenge, WebAuthnCredential
+from .forms import (
+    EmailLoginForm, OTPCodeForm, PasswordRecoveryRequestForm, SecureVoteSetPasswordForm,
+    VerificationChannelForm, VoterRegistrationForm,
+)
+from .models import (
+    AuditLog, ContactVerificationCode, LoginAttempt, User, Voter, WebAuthnChallenge,
+    WebAuthnCredential,
+)
+from .otp import DeliveryUnavailable, ResendCooldown, available_channels, issue_code, mask_destination, verify_code
 from .permissions import admin_required
+
+logger = logging.getLogger(__name__)
+
+
+def _channel_labels(destinations):
+    names = dict(ContactVerificationCode.Channel.choices)
+    return {
+        channel: f"{names[channel]} — {mask_destination(channel, destination)}"
+        for channel, destination in destinations.items()
+    }
+
+
+def _delivery_error(user, purpose, channel):
+    """Record diagnostics without OTPs, destinations, or provider secrets."""
+    logger.warning("OTP delivery unavailable: user_id=%s purpose=%s channel=%s", user.pk, purpose, channel)
+
+
+def _public_workflow_guard(request):
+    """Prevent a second identity workflow from sharing an authenticated session."""
+    if request.user.is_authenticated:
+        return render(request, "accounts/public_session_conflict.html", status=409)
+    return None
 
 
 def register(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
     if request.method == "POST":
         form = VoterRegistrationForm(request.POST)
         if form.is_valid():
             try:
-                form.save()
+                user = form.save()
             except IntegrityError:
                 form.add_error(None, "Registration could not be completed. Please try again.")
             else:
-                return redirect("accounts:registration_success")
+                request.session["registration_verification_user_id"] = user.pk
+                return redirect("accounts:registration_verification_method")
+        elif any(error.code == "underage" for error in form.errors.as_data().get("date_of_birth", [])):
+            return render(request, "accounts/registration_ineligible.html", status=400)
     else:
         form = VoterRegistrationForm()
 
@@ -38,7 +75,236 @@ def register(request):
 
 
 def registration_success(request):
-    return render(request, "accounts/registration_success.html")
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    return render(request, "accounts/registration_success.html", {
+        "activated": request.session.pop("registration_activation_succeeded", False),
+    })
+
+
+def _session_user(request, key):
+    user_id = request.session.get(key)
+    if not user_id:
+        return None
+    return User.objects.filter(pk=user_id).select_related("voter_profile").first()
+
+
+def _registration_user(request):
+    user = _session_user(request, "registration_verification_user_id")
+    if not user or user.status != User.Status.PENDING:
+        request.session.pop("registration_verification_user_id", None)
+        return None
+    return user
+
+
+def registration_verification_method(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _registration_user(request)
+    if not user:
+        return redirect("accounts:register")
+    channels = available_channels(user)
+    channel_labels = _channel_labels(channels)
+    if request.method == "POST":
+        form = VerificationChannelForm(request.POST, channels=channel_labels)
+        if form.is_valid():
+            try:
+                _, destination = issue_code(user, ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, form.cleaned_data["channel"])
+            except ResendCooldown as exc:
+                form.add_error(None, str(exc))
+            except DeliveryUnavailable:
+                _delivery_error(user, ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, form.cleaned_data["channel"])
+                form.add_error(None, "We couldn't send your verification code using that method. Please try again or choose another verification method.")
+            else:
+                AuditLog.objects.create(user=user, action="registration_contact_code_sent", description="Registration contact code issued via selected channel.", ip_address=get_client_ip(request))
+                request.session["registration_otp_destination"] = destination
+                return redirect("accounts:registration_verification_code")
+    else:
+        form = VerificationChannelForm(channels=channel_labels)
+    return render(request, "accounts/verification_method.html", {
+        "form": form, "heading": "Verify your contact details", "intro": "Choose where SecureVote should send your one-time verification code.",
+    })
+
+
+def registration_verification_code(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _registration_user(request)
+    if not user:
+        return redirect("accounts:register")
+    if request.method == "POST":
+        form = OTPCodeForm(request.POST)
+        if form.is_valid():
+            result = verify_code(user, ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, form.cleaned_data["code"])
+            if result.valid:
+                with transaction.atomic():
+                    user = User.objects.select_for_update().get(pk=user.pk)
+                    voter = Voter.objects.select_for_update().get(user=user)
+                    # Only the untouched registration-pending state can become
+                    # active here. An administrator's later suspension/rejection
+                    # is always authoritative and cannot be reversed by an OTP.
+                    activated = (
+                        user.status == User.Status.PENDING
+                        and voter.status == Voter.Status.PENDING
+                    )
+                    if activated:
+                        user.status = User.Status.ACTIVE
+                        user.is_active = True
+                        user.save(update_fields=["status", "is_active"])
+                        voter.status = Voter.Status.VERIFIED
+                        voter.save(update_fields=["status"])
+                AuditLog.objects.create(user=user, action="registration_contact_verified", description="Registration contact verification completed.", ip_address=get_client_ip(request))
+                if activated:
+                    AuditLog.objects.create(user=user, action="voter_auto_activated", description="Eligible voter activated after contact verification.", ip_address=get_client_ip(request))
+                request.session.pop("registration_verification_user_id", None)
+                request.session.pop("registration_otp_destination", None)
+                request.session["registration_activation_succeeded"] = activated
+                return redirect("accounts:registration_success")
+            form.add_error("code", result.reason)
+    else:
+        form = OTPCodeForm()
+    return render(request, "accounts/verification_code.html", {
+        "form": form, "destination": request.session.get("registration_otp_destination", "your selected contact"),
+        "resend_url": reverse("accounts:registration_verification_resend"), "heading": "Enter your verification code",
+    })
+
+
+@require_POST
+def registration_verification_resend(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _registration_user(request)
+    if not user:
+        return redirect("accounts:register")
+    active = user.contact_codes.filter(
+        purpose=ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION,
+        used_at__isnull=True, invalidated_at__isnull=True,
+    ).first()
+    if not active:
+        return redirect("accounts:registration_verification_method")
+    try:
+        _, destination = issue_code(user, active.purpose, active.channel)
+    except ResendCooldown as exc:
+        messages.warning(request, str(exc))
+    except DeliveryUnavailable:
+        _delivery_error(user, active.purpose, active.channel)
+        messages.error(request, "We couldn't send your verification code using that method. Please choose another verification method.")
+        return redirect("accounts:registration_verification_method")
+    else:
+        AuditLog.objects.create(user=user, action="registration_contact_code_resent", description="Registration contact code reissued via selected channel.", ip_address=get_client_ip(request))
+        request.session["registration_otp_destination"] = destination
+    return redirect("accounts:registration_verification_code")
+
+
+def password_reset_request(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    if request.method == "POST":
+        form = PasswordRecoveryRequestForm(request.POST)
+        if form.is_valid():
+            user = User.objects.filter(email__iexact=form.cleaned_data["email"]).first()
+            if user:
+                request.session["password_reset_user_id"] = user.pk
+            else:
+                request.session.pop("password_reset_user_id", None)
+            request.session.pop("password_reset_verified_user_id", None)
+            return redirect("accounts:password_reset_method")
+    else:
+        form = PasswordRecoveryRequestForm()
+    return render(request, "accounts/password_reset_form.html", {"form": form})
+
+
+def password_reset_method(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _session_user(request, "password_reset_user_id")
+    # Present the same channel set even when the address is unknown, so the
+    # password-recovery interface cannot be used to enumerate accounts.
+    choices = {
+        ContactVerificationCode.Channel.EMAIL: "Email",
+        ContactVerificationCode.Channel.SMS: "SMS",
+        ContactVerificationCode.Channel.WHATSAPP: "WhatsApp",
+    }
+    if request.method == "POST":
+        form = VerificationChannelForm(request.POST, channels=choices)
+        if form.is_valid():
+            channel = form.cleaned_data["channel"]
+            request.session["password_reset_channel"] = channel
+            if user and channel in available_channels(user):
+                try:
+                    _, destination = issue_code(user, ContactVerificationCode.Purpose.PASSWORD_RESET, channel)
+                except (DeliveryUnavailable, ResendCooldown):
+                    destination = "your selected contact"
+                else:
+                    AuditLog.objects.create(user=user, action="password_reset_code_sent", description="Password-reset contact code issued via selected channel.", ip_address=get_client_ip(request))
+                request.session["password_reset_otp_destination"] = destination
+            return redirect("accounts:password_reset_code")
+    else:
+        form = VerificationChannelForm(channels=choices)
+    return render(request, "accounts/verification_method.html", {
+        "form": form, "heading": "Choose a recovery method",
+        "intro": "If the account is eligible for recovery, SecureVote will send a verification code using the selected method.",
+    })
+
+
+def password_reset_code(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _session_user(request, "password_reset_user_id")
+    if request.method == "POST":
+        form = OTPCodeForm(request.POST)
+        if form.is_valid():
+            if user:
+                result = verify_code(user, ContactVerificationCode.Purpose.PASSWORD_RESET, form.cleaned_data["code"])
+            else:
+                result = None
+            if result and result.valid:
+                request.session["password_reset_verified_user_id"] = user.pk
+                AuditLog.objects.create(user=user, action="password_reset_code_verified", description="Password-reset contact code verified.", ip_address=get_client_ip(request))
+                return redirect("accounts:password_reset_new_password")
+            form.add_error("code", result.reason if result else "The verification code is invalid.")
+    else:
+        form = OTPCodeForm()
+    return render(request, "accounts/verification_code.html", {
+        "form": form, "destination": request.session.get("password_reset_otp_destination", "your selected contact"),
+        "resend_url": reverse("accounts:password_reset_resend"), "heading": "Enter your recovery code",
+    })
+
+
+@require_POST
+def password_reset_resend(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _session_user(request, "password_reset_user_id")
+    channel = request.session.get("password_reset_channel")
+    if user and channel in available_channels(user):
+        try:
+            _, destination = issue_code(user, ContactVerificationCode.Purpose.PASSWORD_RESET, channel)
+        except (DeliveryUnavailable, ResendCooldown):
+            pass
+        else:
+            AuditLog.objects.create(user=user, action="password_reset_code_resent", description="Password-reset contact code reissued via selected channel.", ip_address=get_client_ip(request))
+            request.session["password_reset_otp_destination"] = destination
+    return redirect("accounts:password_reset_code")
+
+
+def password_reset_new_password(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
+    user = _session_user(request, "password_reset_verified_user_id")
+    if not user:
+        return redirect("accounts:password_reset")
+    if request.method == "POST":
+        form = SecureVoteSetPasswordForm(user, request.POST)
+        if form.is_valid():
+            form.save()
+            AuditLog.objects.create(user=user, action="password_reset_completed", description="Password reset completed.", ip_address=get_client_ip(request))
+            for key in ("password_reset_user_id", "password_reset_verified_user_id", "password_reset_channel", "password_reset_otp_destination"):
+                request.session.pop(key, None)
+            return redirect("accounts:password_reset_complete")
+    else:
+        form = SecureVoteSetPasswordForm(user)
+    return render(request, "accounts/password_reset_confirm.html", {"form": form, "validlink": True})
 
 
 def home(request):
@@ -64,6 +330,8 @@ def get_client_ip(request):
 
 
 def login_view(request):
+    if conflict := _public_workflow_guard(request):
+        return conflict
     if request.method == "POST":
         form = EmailLoginForm(request.POST)
         if form.is_valid():
@@ -304,7 +572,7 @@ def webauthn_authentication_verify(request):
     request.session["webauthn_verified_voter_id"] = voter.pk
     request.session["webauthn_verified_at"] = timezone.now().isoformat()
     _audit(voter, "webauthn_authentication_succeeded", "Device verification succeeded.")
-    return JsonResponse({"ok": True, "next": "/accounts/biometric/"})
+    return JsonResponse({"ok": True, "next": reverse("accounts:biometric_entry")})
 
 
 @require_POST

@@ -1,6 +1,7 @@
 import csv
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.utils import timezone
 from accounts.models import AuditLog
 from accounts.permissions import admin_required, verified_voter_required
 from elections.models import Election
@@ -17,7 +18,11 @@ def _result_context(elections):
 
 @verified_voter_required
 def voter_results(request):
-    return render(request, "reports/results.html", {"election_results": _result_context(Election.objects.filter(status=Election.Status.CLOSED)), "admin_view": False})
+    elections = Election.objects.filter(
+        results_published_at__isnull=False,
+        end_date__lte=timezone.now(),
+    ).exclude(status=Election.Status.CANCELLED)
+    return render(request, "reports/results.html", {"election_results": _result_context(elections), "admin_view": False})
 
 
 @admin_required

@@ -8,17 +8,17 @@ app_name = "accounts"
 urlpatterns = [
     path("register/", views.register, name="register"),
     path("register/success/", views.registration_success, name="registration_success"),
+    path("register/verify/", views.registration_verification_method, name="registration_verification_method"),
+    path("register/verify/code/", views.registration_verification_code, name="registration_verification_code"),
+    path("register/verify/resend/", views.registration_verification_resend, name="registration_verification_resend"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
-    path("password-reset/", auth_views.PasswordResetView.as_view(
-        template_name="accounts/password_reset_form.html",
-        email_template_name="accounts/password_reset_email.txt",
-        subject_template_name="accounts/password_reset_subject.txt",
-        success_url=reverse_lazy("accounts:password_reset_done"),
-    ), name="password_reset"),
-    path("password-reset/done/", auth_views.PasswordResetDoneView.as_view(
-        template_name="accounts/password_reset_done.html",
-    ), name="password_reset_done"),
+    path("password-reset/", views.password_reset_request, name="password_reset"),
+    path("password-reset/method/", views.password_reset_method, name="password_reset_method"),
+    path("password-reset/code/", views.password_reset_code, name="password_reset_code"),
+    path("password-reset/resend/", views.password_reset_resend, name="password_reset_resend"),
+    path("password-reset/new-password/", views.password_reset_new_password, name="password_reset_new_password"),
+    path("password-reset/done/", auth_views.PasswordResetDoneView.as_view(template_name="accounts/password_reset_done.html"), name="password_reset_done"),
     path("reset/<uidb64>/<token>/", auth_views.PasswordResetConfirmView.as_view(
         template_name="accounts/password_reset_confirm.html",
         success_url=reverse_lazy("accounts:password_reset_complete"),

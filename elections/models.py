@@ -18,6 +18,11 @@ class Election(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="elections_created")
     created_at = models.DateTimeField(auto_now_add=True)
+    results_published_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set only when final results are explicitly published after the election has closed.",
+    )
 
     class Meta:
         ordering = ["-start_date"]
@@ -47,6 +52,10 @@ class Election(models.Model):
     @property
     def is_open_for_voting(self):
         return self.status == self.Status.ACTIVE and self.calculated_status == self.Status.ACTIVE
+
+    @property
+    def results_are_published(self):
+        return self.results_published_at is not None
 
     def __str__(self):
         return self.title

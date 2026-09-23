@@ -90,10 +90,19 @@ body.app-body { min-height: 100vh; margin: 0; color: var(--ink); background: #f8
 .field-group textarea { resize: vertical; }
 .field-group input:focus, .field-group textarea:focus, .field-group select:focus { border-color: #579bda; box-shadow: 0 0 0 3px rgba(87,155,218,.16); outline: 0; }
 .field-error, .form-errors { display: block; margin-top: 6px; color: #b42318; font-size: .87rem; }
+.field-help { display: block; margin-top: 6px; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+.ineligible-icon { background: #fff4f4; color: #a22b2b; }
 .form-errors ul, .field-error ul { margin: 0; padding-left: 18px; }
 .form-submit { width: 100%; margin-top: 8px; }
 .auth-links { margin: 23px 0 0; color: var(--muted); text-align: center; }
 .auth-links a { color: var(--navy-2); font-weight: 750; }
+.otp-method-form { display: grid; gap: 11px; }
+.channel-choice { display: flex; align-items: center; gap: 11px; padding: 14px; border: 1px solid var(--blue-border); border-radius: 11px; color: var(--navy); cursor: pointer; font-weight: 760; }
+.channel-choice:has(input:checked) { border-color: var(--green); background: #f1fbf6; }
+.channel-choice input { width: auto; accent-color: var(--green); }
+.otp-field input { max-width: 250px; letter-spacing: .35em; font-size: 1.15rem; font-weight: 800; }
+.resend-form { margin-top: 15px; text-align: center; }
+.text-button { border: 0; background: transparent; color: var(--navy-2); cursor: pointer; font-weight: 750; text-decoration: underline; }
 .security-note { display: flex; gap: 10px; margin-top: 22px; padding: 13px; border-radius: 11px; background: var(--blue-soft); color: #395d83; font-size: .9rem; line-height: 1.5; }
 .status-panel { margin-top: 25px; padding: 17px; border: 1px solid var(--blue-border); border-radius: 13px; background: #f8fbff; color: var(--ink); }
 .status-panel p { margin: 0; }

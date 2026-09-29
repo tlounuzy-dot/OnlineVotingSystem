@@ -108,6 +108,12 @@ body.app-body { min-height: 100vh; margin: 0; color: var(--ink); background: #f8
 .status-panel p { margin: 0; }
 .status-panel .button { margin-top: 15px; }
 .success-mark { display: inline-grid; width: 62px; height: 62px; place-items: center; border-radius: 50%; background: #eaf8f1; color: var(--green-dark); font-size: 1.9rem; font-weight: 900; }
+.webauthn-success-mark { margin-top: 16px; }
+.webauthn-success-state { margin-top: 25px; padding: 22px; border: 1px solid #8bd5b5; border-radius: 14px; background: #f1fbf6; text-align: center; }
+.webauthn-success-state h2 { margin: 15px 0 7px; color: var(--navy); font-size: 1.35rem; }
+.webauthn-success-state p { margin: 0; color: var(--muted); line-height: 1.55; }
+.webauthn-success-actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 23px; }
+.webauthn-success-actions .button { margin-top: 0; }
 .key-points { margin: 22px 0 0; padding: 0; list-style: none; color: var(--muted); }
 .key-points li { margin: 9px 0; padding-left: 22px; position: relative; }
 .key-points li::before { position: absolute; left: 0; color: var(--green); content: "✓"; font-weight: 900; }
@@ -232,6 +238,7 @@ body.app-body { min-height: 100vh; margin: 0; color: var(--ink); background: #f8
 .detail-meta > div { padding: 15px; border-radius: 12px; background: #f5faff; }
 .detail-meta span { display: block; color: var(--muted); font-size: .77rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .detail-meta strong { display: block; margin-top: 6px; color: var(--navy); font-size: .95rem; }
+.detail-meta small { display: block; margin-top: 5px; color: var(--green-dark); font-size: .78rem; font-weight: 700; }
 .detail-actions, .form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 27px; }
 .detail-actions form { margin: 0; }
 .button-danger { border-color: #b63737; background: #b63737; }
@@ -255,4 +262,4 @@ body.app-body { min-height: 100vh; margin: 0; color: var(--ink); background: #f8
 .audit-action { color: var(--navy-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
 
 @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 38px; } .feature-grid, .steps-grid, .voter-status-grid, .admin-stat-grid, .admin-shortcut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .steps-grid li:nth-child(2)::after { display: none; } .result-layout { grid-template-columns: 1fr; } .admin-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 600px) { .page-container { width: min(100% - 28px, 1140px); } .nav-content { min-height: 64px; } .nav-link { display: none; } .brand { font-size: 1.05rem; } .site-footer, .footer-content { text-align: center; } .footer-content { flex-direction: column; } .hero-section { padding: 48px 0; } .hero-actions, .hero-actions .button, .hero-actions form, .ballot-actions .button, .confirmation-actions .button, .receipt-actions .button { width: 100%; } .feature-grid, .steps-grid, .voter-status-grid, .election-grid, .candidate-grid, .admin-stat-grid, .admin-shortcut-grid, .admin-candidate-grid, .detail-meta { grid-template-columns: 1fr; } .steps-grid { gap: 26px; } .steps-grid li::after { display: none; } .section-space, .how-section { padding: 55px 0; } .auth-page { padding: 30px 0; } .voter-page, .admin-page { padding: 36px 0 55px; } .voter-hero, .results-heading, .result-election-header, .admin-heading, .detail-heading { align-items: flex-start; flex-direction: column; } .status-card { min-height: auto; } .result-election { padding: 19px; } .admin-search, .admin-search > div { width: 100%; align-items: stretch; flex-direction: column; } }
+@media (max-width: 600px) { .page-container { width: min(100% - 28px, 1140px); } .nav-content { min-height: 64px; } .nav-link { display: none; } .brand { font-size: 1.05rem; } .site-footer, .footer-content { text-align: center; } .footer-content { flex-direction: column; } .hero-section { padding: 48px 0; } .hero-actions, .hero-actions .button, .hero-actions form, .ballot-actions .button, .confirmation-actions .button, .receipt-actions .button, .webauthn-success-actions .button { width: 100%; } .feature-grid, .steps-grid, .voter-status-grid, .election-grid, .candidate-grid, .admin-stat-grid, .admin-shortcut-grid, .admin-candidate-grid, .detail-meta { grid-template-columns: 1fr; } .steps-grid { gap: 26px; } .steps-grid li::after { display: none; } .section-space, .how-section { padding: 55px 0; } .auth-page { padding: 30px 0; } .voter-page, .admin-page { padding: 36px 0 55px; } .voter-hero, .results-heading, .result-election-header, .admin-heading, .detail-heading { align-items: flex-start; flex-direction: column; } .status-card { min-height: auto; } .result-election { padding: 19px; } .admin-search, .admin-search > div { width: 100%; align-items: stretch; flex-direction: column; } }

@@ -333,6 +333,45 @@ class ContactVerificationCode(models.Model):
         return f"{self.get_purpose_display()} via {self.get_channel_display()} for user {self.user_id}"
 
 
+class SMSDeliveryMetadata(models.Model):
+    """Non-secret Infobip delivery state associated with one SMS OTP submission.
+
+    This deliberately lives apart from ContactVerificationCode so provider
+    identifiers and delivery states cannot be mistaken for verification secrets.
+    It never stores the recipient, message body, OTP, API key, or headers.
+    """
+
+    class Provider(models.TextChoices):
+        INFOBIP = "infobip", "Infobip"
+
+    contact_code = models.OneToOneField(
+        ContactVerificationCode,
+        on_delete=models.CASCADE,
+        related_name="sms_delivery_metadata",
+    )
+    provider = models.CharField(max_length=32, choices=Provider.choices)
+    provider_message_id = models.CharField(max_length=128, unique=True)
+    initial_status_group = models.CharField(max_length=64, blank=True)
+    initial_status_name = models.CharField(max_length=100, blank=True)
+    initial_status_description = models.CharField(max_length=255, blank=True)
+    last_status_group = models.CharField(max_length=64, blank=True)
+    last_status_name = models.CharField(max_length=100, blank=True)
+    last_status_description = models.CharField(max_length=255, blank=True)
+    last_error_group = models.CharField(max_length=64, blank=True)
+    last_error_name = models.CharField(max_length=100, blank=True)
+    last_error_description = models.CharField(max_length=255, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    finalized_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]
+        indexes = [models.Index(fields=["provider", "last_status_group"])]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} SMS delivery metadata ({self.initial_status_name or 'submitted'})"
+
+
 class AuditLog(models.Model):
     user = models.ForeignKey(
         User, null=True, blank=True, on_delete=models.SET_NULL, related_name="audit_logs"

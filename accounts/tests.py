@@ -1,9 +1,11 @@
 import base64
 import hashlib
+from io import BytesIO
 import json
 import re
 from datetime import date, timedelta
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
+from urllib.error import HTTPError, URLError
 
 import cbor2
 from cryptography.hazmat.primitives import hashes, serialization
@@ -17,8 +19,11 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import AuditLog, ContactVerificationCode, LoginAttempt, Role, Voter, WebAuthnChallenge, WebAuthnCredential
-from .otp import DeliveryUnavailable, issue_code, normalize_phone_number, verify_code
+from .models import (AuditLog, ContactVerificationCode, LoginAttempt, Role,
+                     SMSDeliveryMetadata, Voter, WebAuthnChallenge,
+                     WebAuthnCredential)
+from .otp import (DeliveryUnavailable, fetch_infobip_delivery_report, issue_code,
+                  normalize_phone_number, verify_code)
 from .eligibility import calculate_age
 
 
@@ -419,7 +424,10 @@ class ContactVerificationTests(TestCase):
             "email": user.email, "password": "CorrectHorse!42Car",
         })
         self.assertRedirects(login_response, reverse("accounts:biometric_entry"))
-        self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 403)
+        self.assertRedirects(
+            self.client.get(reverse("elections:voter_dashboard")),
+            reverse("accounts:biometric_entry"),
+        )
         audit_text = " ".join(AuditLog.objects.filter(user=user).values_list("description", flat=True))
         self.assertNotIn("123456", audit_text)
         self.assertTrue(AuditLog.objects.filter(user=user, action="registration_contact_code_sent").exists())
@@ -457,15 +465,136 @@ class ContactVerificationTests(TestCase):
         self.assertEqual(self.voter.status, Voter.Status.PENDING)
         self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 302)
 
-    @override_settings(TWILIO_ACCOUNT_SID="sid", TWILIO_AUTH_TOKEN="token", TWILIO_SMS_FROM_NUMBER="+27110000000", TWILIO_WHATSAPP_FROM_NUMBER="whatsapp:+27110000000")
-    def test_sms_and_whatsapp_use_provider_boundary_when_configured(self):
+    @override_settings(
+        INFOBIP_API_BASE_URL="https://securevote.api.infobip.com",
+        INFOBIP_API_KEY="test-api-key",
+        INFOBIP_SMS_SENDER="ServiceSMS",
+        TWILIO_ACCOUNT_SID="sid",
+        TWILIO_AUTH_TOKEN="token",
+        TWILIO_WHATSAPP_FROM_NUMBER="whatsapp:+27110000000",
+    )
+    def test_sms_uses_infobip_and_whatsapp_retains_twilio_provider_boundary(self):
         self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
-        with patch("accounts.otp._send_twilio_otp") as send:
+        infobip_response = MagicMock()
+        infobip_response.getcode.return_value = 200
+        infobip_response.read.return_value = (
+            b'{"messages": [{"messageId": "test-message", "status": '
+            b'{"groupName": "PENDING", "name": "PENDING_ACCEPTED", '
+            b'"description": "Message sent to next instance"}}]}'
+        )
+        infobip_response.__enter__.return_value = infobip_response
+        with patch("accounts.otp.urlopen", return_value=infobip_response) as infobip_send, patch("accounts.otp._send_twilio_otp") as twilio_send:
             self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
             self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, "whatsapp")
-        self.assertEqual(send.call_count, 2)
-        send.assert_any_call("sms", "+27712345678", ANY, ContactVerificationCode.Purpose.PASSWORD_RESET)
-        send.assert_any_call("whatsapp", "+27712345678", ANY, ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION)
+        request = infobip_send.call_args.args[0]
+        self.assertEqual(request.full_url, "https://securevote.api.infobip.com/sms/3/messages")
+        self.assertEqual(request.get_header("Authorization"), "App test-api-key")
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["messages"][0]["sender"], "ServiceSMS")
+        self.assertEqual(payload["messages"][0]["destinations"], [{"to": "+27712345678"}])
+        self.assertIn("123456", payload["messages"][0]["content"]["text"])
+        delivery = SMSDeliveryMetadata.objects.get(contact_code__purpose=ContactVerificationCode.Purpose.PASSWORD_RESET)
+        self.assertEqual(delivery.provider, SMSDeliveryMetadata.Provider.INFOBIP)
+        self.assertEqual(delivery.provider_message_id, "test-message")
+        self.assertEqual(delivery.initial_status_name, "PENDING_ACCEPTED")
+        self.assertFalse(hasattr(delivery, "otp"))
+        self.assertFalse(hasattr(delivery, "recipient"))
+        twilio_send.assert_called_once_with(
+            "whatsapp", "+27712345678", ANY,
+            ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION,
+        )
+
+    @override_settings(
+        INFOBIP_API_BASE_URL="https://securevote.api.infobip.com",
+        INFOBIP_API_KEY="test-api-key",
+        INFOBIP_SMS_SENDER="ServiceSMS",
+    )
+    def test_infobip_delivery_report_is_scoped_to_one_stored_message_id(self):
+        code = ContactVerificationCode.objects.create(
+            user=self.user,
+            purpose=ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION,
+            channel=ContactVerificationCode.Channel.SMS,
+            contact_digest="a" * 64,
+            code_hash="not-an-otp-plaintext",
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        delivery = SMSDeliveryMetadata.objects.create(
+            contact_code=code,
+            provider=SMSDeliveryMetadata.Provider.INFOBIP,
+            provider_message_id="stored-message-id",
+            initial_status_group="PENDING",
+            initial_status_name="PENDING_ACCEPTED",
+        )
+        report_response = MagicMock()
+        report_response.getcode.return_value = 200
+        report_response.read.return_value = (
+            b'{"results": [{"status": {"groupName": "DELIVERED", '
+            b'"name": "DELIVERED_TO_HANDSET", "description": "Message delivered"}, '
+            b'"error": {"groupName": "OK", "name": "NO_ERROR", "description": "No Error"}}]}'
+        )
+        report_response.__enter__.return_value = report_response
+        with patch("accounts.otp.urlopen", return_value=report_response) as fetch:
+            refreshed = fetch_infobip_delivery_report(delivery)
+        request = fetch.call_args.args[0]
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(request.full_url, "https://securevote.api.infobip.com/sms/3/reports?messageId=stored-message-id")
+        self.assertEqual(refreshed.last_status_name, "DELIVERED_TO_HANDSET")
+        self.assertEqual(refreshed.last_error_name, "NO_ERROR")
+        self.assertIsNotNone(refreshed.last_checked_at)
+        self.assertIsNotNone(refreshed.finalized_at)
+
+    @override_settings(
+        INFOBIP_API_BASE_URL="https://securevote.api.infobip.com",
+        INFOBIP_API_KEY="test-api-key",
+        INFOBIP_SMS_SENDER="ServiceSMS",
+    )
+    def test_infobip_non_success_response_is_safe_and_logs_no_recipient_or_otp(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        error = HTTPError(
+            "https://securevote.api.infobip.com/sms/3/messages", 401, "Unauthorized", None,
+            BytesIO(b'{"requestError": {"serviceException": {"messageId": "UNAUTHORIZED"}}}'),
+        )
+        with patch("accounts.otp.urlopen", side_effect=error), self.assertLogs("accounts.otp", level="WARNING") as logs:
+            with self.assertRaises(DeliveryUnavailable):
+                self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
+        logged = " ".join(logs.output)
+        self.assertIn("provider=infobip", logged)
+        self.assertIn("http_status=401", logged)
+        self.assertIn("provider_code=UNAUTHORIZED", logged)
+        self.assertNotIn("+27712345678", logged)
+        self.assertNotIn("123456", logged)
+
+    @override_settings(
+        INFOBIP_API_BASE_URL="https://securevote.api.infobip.com",
+        INFOBIP_API_KEY="test-api-key",
+        INFOBIP_SMS_SENDER="ServiceSMS",
+    )
+    def test_infobip_connection_and_malformed_response_fail_safely(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        with patch("accounts.otp.urlopen", side_effect=URLError("unavailable")):
+            with self.assertRaises(DeliveryUnavailable):
+                self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
+        malformed_response = MagicMock()
+        malformed_response.getcode.return_value = 200
+        malformed_response.read.return_value = b"not-json"
+        malformed_response.__enter__.return_value = malformed_response
+        with patch("accounts.otp.urlopen", return_value=malformed_response):
+            with self.assertRaises(DeliveryUnavailable):
+                self._issue(ContactVerificationCode.Purpose.REGISTRATION_VERIFICATION, "sms")
+
+    @override_settings(
+        INFOBIP_API_BASE_URL="securevote.api.infobip.com",
+        INFOBIP_API_KEY="test-api-key",
+        INFOBIP_SMS_SENDER="ServiceSMS",
+    )
+    def test_infobip_invalid_base_url_is_reported_safely_before_a_network_request(self):
+        self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
+        with patch("accounts.otp.urlopen") as send, self.assertLogs("accounts.otp", level="WARNING") as logs:
+            with self.assertRaises(DeliveryUnavailable):
+                self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
+        self.assertFalse(send.called)
+        self.assertIn("error_type=invalid_base_url", " ".join(logs.output))
 
     def test_south_african_phone_normalization_and_provider_failure_are_safe(self):
         self.assertEqual(normalize_phone_number("071 234 5678"), "+27712345678")
@@ -486,7 +615,8 @@ class ContactVerificationTests(TestCase):
         self.assertNotContains(response, "not configured")
         self.assertContains(response, "+27 ****** 678")
 
-    def test_missing_sms_credentials_fail_gracefully_without_sending(self):
+    @override_settings(INFOBIP_API_BASE_URL="", INFOBIP_API_KEY="", INFOBIP_SMS_SENDER="")
+    def test_missing_infobip_configuration_fails_gracefully_without_sending(self):
         self.voter.phone = "0712345678"; self.voter.save(update_fields=["phone"])
         with self.assertRaises(DeliveryUnavailable):
             self._issue(ContactVerificationCode.Purpose.PASSWORD_RESET, "sms")
@@ -650,6 +780,64 @@ class WebAuthnCredentialModelTests(TestCase):
         self.assertFalse(field_names & {"fingerprint", "face", "template", "password", "private_key"})
 
 
+class WebAuthnRegistrationUXTests(TestCase):
+    def setUp(self):
+        role = Role.objects.create(name="Voter")
+        self.user = get_user_model().objects.create_user(
+            email="registration-ux@example.test", password="CorrectHorse!42Car",
+            full_name="Registration UX Voter", role=role,
+            status=get_user_model().Status.ACTIVE,
+        )
+        self.voter = Voter.objects.create(
+            user=self.user, id_number="REG-UX-1", date_of_birth="2000-01-01",
+            status=Voter.Status.VERIFIED,
+        )
+        self.url = reverse("accounts:webauthn_registration")
+        self.client.force_login(self.user)
+
+    def test_registration_page_shows_primary_action_before_a_credential_exists(self):
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "Register this device")
+        self.assertFalse(response.context["registration_complete"])
+
+    def test_registered_credential_renders_persistent_success_state(self):
+        WebAuthnCredential.objects.create(
+            voter=self.voter, credential_id=b"registration-ux-device", public_key=b"example-cose-key",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "Device security registered successfully")
+        self.assertContains(response, "This device is now registered. Verify your device to continue securely.")
+        self.assertContains(response, "Verify device and continue")
+        self.assertContains(response, reverse("accounts:webauthn_authentication"))
+        self.assertContains(response, "Register another device")
+        self.assertNotContains(response, "Register this device")
+
+    def test_registered_credential_without_a_verified_session_is_redirected_to_device_verification(self):
+        WebAuthnCredential.objects.create(
+            voter=self.voter, credential_id=b"registration-ux-device", public_key=b"example-cose-key",
+        )
+
+        response = self.client.get(reverse("elections:voter_dashboard"))
+
+        self.assertRedirects(response, reverse("accounts:biometric_entry"))
+        self.assertNotIn("webauthn_verified_voter_id", self.client.session)
+        biometric_entry = self.client.get(reverse("accounts:biometric_entry"))
+        self.assertContains(biometric_entry, reverse("accounts:webauthn_authentication"))
+
+    def test_add_another_device_uses_existing_multiple_credential_support(self):
+        WebAuthnCredential.objects.create(
+            voter=self.voter, credential_id=b"registration-ux-device", public_key=b"example-cose-key",
+        )
+
+        response = self.client.get(f"{self.url}?add=1")
+
+        self.assertContains(response, "Register this device")
+        self.assertFalse(response.context["registration_complete"])
+
+
 class WebAuthnAuthenticationTests(TestCase):
     def setUp(self):
         role = Role.objects.create(name="Voter")
@@ -793,6 +981,7 @@ class WebAuthnAuthenticationSecurityTests(TestCase):
         self.assertEqual(response.json()["next"], reverse("accounts:biometric_entry"))
         self.assertEqual(self.client.session["webauthn_verified_voter_id"], self.voter.pk)
         self.assertNotEqual(self.client.session.session_key, session_key)
+        self.assertEqual(self.client.get(reverse("elections:voter_dashboard")).status_code, 200)
         challenge = WebAuthnChallenge.objects.get(challenge_id=challenge_id)
         credential.refresh_from_db()
         self.assertIsNotNone(challenge.consumed_at)

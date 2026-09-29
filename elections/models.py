@@ -39,9 +39,9 @@ class Election(models.Model):
 
     @property
     def calculated_status(self):
-        """Return the date-based status while preserving a manual cancellation."""
-        if self.status == self.Status.CANCELLED:
-            return self.Status.CANCELLED
+        """Return the date-based status while preserving manual final states."""
+        if self.status in {self.Status.CLOSED, self.Status.CANCELLED}:
+            return self.status
         now = timezone.now()
         if now < self.start_date:
             return self.Status.PENDING

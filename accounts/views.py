@@ -416,9 +416,18 @@ def _audit(voter, action, description):
 
 @login_required(login_url="accounts:login")
 def webauthn_registration(request):
-    if not _eligible_voter(request):
+    voter = _eligible_voter(request)
+    if not voter:
         return render(request, "accounts/biometric_registration.html", {"registration_allowed": False}, status=403)
-    return render(request, "accounts/biometric_registration.html", {"registration_allowed": True})
+    has_active_credential = voter.webauthn_credentials.filter(
+        status=WebAuthnCredential.Status.ACTIVE,
+    ).exists()
+    adding_another_device = request.GET.get("add") == "1"
+    return render(request, "accounts/biometric_registration.html", {
+        "registration_allowed": True,
+        "registration_complete": has_active_credential and not adding_another_device,
+        "can_register_another": has_active_credential,
+    })
 
 
 @login_required(login_url="accounts:login")

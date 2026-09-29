@@ -175,9 +175,15 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 OTP_EXPIRY_SECONDS = int(os.environ.get("OTP_EXPIRY_SECONDS", "300"))
 OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+# Infobip SMS uses the current v3 SMS API.  The documented ServiceSMS sender is
+# suitable for trial accounts only; production deployments must set their own
+# approved sender through the environment.
+INFOBIP_API_BASE_URL = os.environ.get("INFOBIP_API_BASE_URL", "")
+INFOBIP_API_KEY = os.environ.get("INFOBIP_API_KEY", "")
+INFOBIP_SMS_SENDER = os.environ.get("INFOBIP_SMS_SENDER", "ServiceSMS")
+INFOBIP_SMS_TIMEOUT_SECONDS = int(os.environ.get("INFOBIP_SMS_TIMEOUT_SECONDS", "10"))
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_SMS_FROM_NUMBER = os.environ.get("TWILIO_SMS_FROM_NUMBER", "")
 TWILIO_WHATSAPP_FROM_NUMBER = os.environ.get("TWILIO_WHATSAPP_FROM_NUMBER", "")
 
 # Production must set these to its HTTPS origin and registrable relying-party ID.

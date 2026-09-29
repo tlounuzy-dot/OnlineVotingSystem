@@ -23,6 +23,6 @@ class VotingFlowTests(TestCase):
     def test_verified_voter_submits_encrypted_single_vote_and_audit(self):
         self.verified();self.client.post(reverse("voting:choose",args=[self.election.pk]),{"candidate":self.candidate.pk});self.assertEqual(self.client.post(reverse("voting:submit",args=[self.election.pk])).status_code,302)
         vote=Vote.objects.get();self.assertNotEqual(vote.encrypted_choice,str(self.candidate.pk).encode());self.assertEqual(decrypt_choice(vote.encrypted_choice),self.candidate.pk);self.assertTrue(AuditLog.objects.filter(action="vote_submitted").exists());self.client.post(reverse("voting:submit",args=[self.election.pk]));self.assertEqual(Vote.objects.count(),1)
-    def test_unverified_inactive_candidate_and_closed_election_cannot_vote(self):
-        self.client.force_login(self.user);self.assertEqual(self.client.get(reverse("voting:ballot",args=[self.election.pk])).status_code,403)
+    def test_unverified_voter_is_redirected_to_device_verification_and_inactive_candidate_and_closed_election_cannot_vote(self):
+        self.client.force_login(self.user);self.assertRedirects(self.client.get(reverse("voting:ballot",args=[self.election.pk])),reverse("accounts:biometric_entry"))
         self.verified();self.candidate.status="inactive";self.candidate.save();self.assertEqual(self.client.post(reverse("voting:choose",args=[self.election.pk]),{"candidate":self.candidate.pk}).status_code,404);self.election.status="closed";self.election.save();self.assertEqual(self.client.get(reverse("voting:ballot",args=[self.election.pk])).status_code,302)

@@ -1,10 +1,12 @@
 from datetime import timedelta
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from accounts.models import AuditLog, Role, Voter
 from elections.models import Candidate, Election
+from cryptography.fernet import Fernet
+from voting.models import Vote
 from .models import Result
 
 class ReportAccessTests(TestCase):
@@ -17,6 +19,7 @@ class ReportAccessTests(TestCase):
   for url in [reverse("reports:admin_results"),reverse("reports:report_list"),reverse("reports:export_csv"),reverse("reports:audit_logs")]:self.assertEqual(self.client.get(url).status_code,403)
 
 
+@override_settings(VOTE_ENCRYPTION_KEY=Fernet.generate_key().decode())
 class ResultPublicationTests(TestCase):
  def setUp(self):
   ar=Role.objects.create(name="Admin");vr=Role.objects.create(name="Voter")
@@ -59,3 +62,34 @@ class ResultPublicationTests(TestCase):
   self.open.refresh_from_db();self.assertIsNone(self.open.results_published_at)
   self._verified_voter()
   self.assertEqual(self.client.post(reverse("elections:publish_results",args=[self.closed.pk])).status_code,403)
+
+ def test_manually_closed_published_election_shows_real_final_results_after_refresh(self):
+  lifecycle = Election.objects.create(
+   title="Lifecycle result", start_date=timezone.now()-timedelta(hours=1),
+   end_date=timezone.now()+timedelta(hours=1), status=Election.Status.ACTIVE,
+   created_by=self.admin,
+  )
+  candidate = Candidate.objects.create(election=lifecycle, full_name="Lifecycle Candidate", party="P")
+
+  self._verified_voter()
+  self.assertEqual(self.client.post(reverse("voting:choose", args=[lifecycle.pk]), {"candidate": candidate.pk}).status_code, 302)
+  self.assertEqual(self.client.post(reverse("voting:submit", args=[lifecycle.pk])).status_code, 302)
+  self.assertEqual(Vote.objects.filter(election=lifecycle).count(), 1)
+  self.assertContains(self.client.get(reverse("reports:voter_results")), "No results have been published.")
+
+  self.client.force_login(self.admin)
+  self.assertEqual(self.client.post(reverse("elections:transition", args=[lifecycle.pk, "closed"])).status_code, 302)
+  lifecycle.refresh_from_db()
+  self.assertEqual(lifecycle.calculated_status, Election.Status.CLOSED)
+  self.assertIsNone(lifecycle.results_published_at)
+
+  self.assertEqual(self.client.post(reverse("elections:publish_results", args=[lifecycle.pk])).status_code, 302)
+  lifecycle.refresh_from_db()
+  self.assertIsNotNone(lifecycle.results_published_at)
+  result = Result.objects.get(election=lifecycle, candidate=candidate)
+  self.assertEqual(result.total_votes, 1)
+
+  self._verified_voter()
+  results_url = reverse("reports:voter_results")
+  self.assertContains(self.client.get(results_url), "Lifecycle Candidate")
+  self.assertContains(self.client.get(results_url), "Lifecycle Candidate")

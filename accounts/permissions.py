@@ -1,6 +1,7 @@
 from functools import wraps
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.shortcuts import redirect
 from .models import User, Voter
 
 
@@ -22,7 +23,10 @@ def verified_voter_required(view):
         if not voter or request.user.status != User.Status.ACTIVE or voter.status != Voter.Status.VERIFIED:
             raise PermissionDenied
         if request.session.get("webauthn_verified_voter_id") != voter.pk:
-            raise PermissionDenied
+            # A registered credential is not evidence of a verified current
+            # session. Direct an eligible voter through the existing WebAuthn
+            # step-up flow instead of exposing a raw 403 page.
+            return redirect("accounts:biometric_entry")
         request.voter = voter
         return view(request, *args, **kwargs)
     return wrapped

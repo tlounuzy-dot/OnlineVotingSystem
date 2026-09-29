@@ -1,4 +1,5 @@
 import csv
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -20,7 +21,10 @@ def _result_context(elections):
 def voter_results(request):
     elections = Election.objects.filter(
         results_published_at__isnull=False,
-        end_date__lte=timezone.now(),
+    ).filter(
+        # A valid administrative close may occur before the scheduled end time.
+        # Include it alongside elections that have naturally reached their end.
+        Q(status=Election.Status.CLOSED) | Q(end_date__lte=timezone.now()),
     ).exclude(status=Election.Status.CANCELLED)
     return render(request, "reports/results.html", {"election_results": _result_context(elections), "admin_view": False})
 

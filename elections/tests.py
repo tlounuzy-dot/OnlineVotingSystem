@@ -24,3 +24,53 @@ class ElectionAccessTests(TestCase):
         for url in urls:self.assertEqual(self.client.get(url).status_code,302)
         self.client.force_login(self.user)
         for url in urls:self.assertEqual(self.client.get(url).status_code,403)
+
+
+class ElectionDetailPublicationUXTests(TestCase):
+    def setUp(self):
+        admin_role = Role.objects.create(name="Admin")
+        self.admin = get_user_model().objects.create_user(
+            email="detail-admin@example.test", password="ValidPass!42", full_name="Detail Admin",
+            role=admin_role, status="active", is_staff=True,
+        )
+        now = timezone.now()
+        self.closed = Election.objects.create(
+            title="Manually closed", start_date=now - timedelta(hours=1),
+            end_date=now + timedelta(hours=1), status=Election.Status.CLOSED,
+            created_by=self.admin,
+        )
+        self.open = Election.objects.create(
+            title="Open", start_date=now - timedelta(hours=1), end_date=now + timedelta(hours=1),
+            status=Election.Status.ACTIVE, created_by=self.admin,
+        )
+        self.pending = Election.objects.create(
+            title="Pending", start_date=now + timedelta(days=1), end_date=now + timedelta(days=2),
+            status=Election.Status.PENDING, created_by=self.admin,
+        )
+        self.client.force_login(self.admin)
+
+    def _detail(self, election):
+        return self.client.get(reverse("elections:detail", args=[election.pk]))
+
+    def test_closed_unpublished_election_shows_csrf_protected_publish_action_only(self):
+        response = self._detail(self.closed)
+
+        self.assertEqual(self.closed.calculated_status, Election.Status.CLOSED)
+        self.assertContains(response, "Publish final results")
+        self.assertContains(response, reverse("elections:publish_results", args=[self.closed.pk]))
+        self.assertContains(response, "csrfmiddlewaretoken")
+        self.assertNotContains(response, ">Activate<")
+        self.assertNotContains(response, ">Close<")
+
+    def test_open_and_pending_elections_do_not_offer_result_publication(self):
+        self.assertNotContains(self._detail(self.open), "Publish final results")
+        self.assertNotContains(self._detail(self.pending), "Publish final results")
+
+    def test_published_election_shows_timestamp_and_no_repeat_publish_action(self):
+        self.closed.results_published_at = timezone.now()
+        self.closed.save(update_fields=["results_published_at"])
+
+        response = self._detail(self.closed)
+
+        self.assertContains(response, "Published")
+        self.assertNotContains(response, "Publish final results")

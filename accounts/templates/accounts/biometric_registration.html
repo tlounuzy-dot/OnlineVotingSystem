@@ -3,19 +3,26 @@
 {% block content %}
 <section class="auth-page"><div class="auth-shell"><div class="auth-card">
 <span class="auth-icon" aria-hidden="true">⌁</span>
+{% if registration_complete %}
+<span class="success-mark webauthn-success-mark" aria-hidden="true">✓</span>
+<h1>Device security registered successfully</h1>
+<p>This device is now registered. Verify your device to continue securely.</p>
+<div class="security-note"><span aria-hidden="true">⌁</span><span>Your device may use fingerprint, face recognition, a PIN, or another local platform-authenticator method. SecureVote never receives raw biometric data or your Windows Hello PIN.</span></div>
+<div class="webauthn-success-actions"><a class="button form-submit" href="{% url 'accounts:webauthn_authentication' %}">Verify device and continue</a>{% if can_register_another %}<a class="button button-outline" href="{% url 'accounts:webauthn_registration' %}?add=1">Register another device</a>{% endif %}</div>
+{% elif registration_allowed %}
 <h1>Register device security</h1>
-{% if registration_allowed %}
 <p>Register your device's biometric or security authentication. Your device may use fingerprint, face recognition, PIN, or another platform authenticator; this site never receives biometric data.</p>
-<div class="status-panel"><p id="status" role="status">Checking device support…</p><button class="button form-submit" id="register" type="button" disabled>Register this device</button></div>
+<div class="status-panel" id="registration-panel"><p id="status" role="status">Checking device support…</p><button class="button form-submit" id="register" type="button" disabled>Register this device</button></div>
+<div class="webauthn-success-state" id="registration-success" hidden aria-live="polite"><span class="success-mark" aria-hidden="true">✓</span><h2>Device security registered successfully</h2><p>This device is now registered. Verify your device to continue securely.</p><div class="webauthn-success-actions"><a class="button form-submit" href="{% url 'accounts:webauthn_authentication' %}">Verify device and continue</a><a class="button button-outline" href="{% url 'accounts:webauthn_registration' %}?add=1">Register another device</a></div></div>
 {% else %}<p>This account is not eligible to register a device credential.</p>{% endif %}
 </div></div></section>
 {% endblock %}
-{% block scripts %}{% if registration_allowed %}<script>
+{% block scripts %}{% if registration_allowed and not registration_complete %}<script>
 const csrf=document.cookie.split('; ').find(x=>x.startsWith('csrftoken='))?.split('=')[1];
-const status=document.querySelector('#status'), button=document.querySelector('#register');
+const status=document.querySelector('#status'), button=document.querySelector('#register'), panel=document.querySelector('#registration-panel'), success=document.querySelector('#registration-success');
 const bytes=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const encode=c=>({id:c.id,rawId:b64(c.rawId),type:c.type,authenticatorAttachment:c.authenticatorAttachment,response:{clientDataJSON:b64(c.response.clientDataJSON),attestationObject:b64(c.response.attestationObject),transports:c.response.getTransports?.()||[]},clientExtensionResults:c.getClientExtensionResults()});
 if (!window.PublicKeyCredential) status.textContent='WebAuthn is unavailable in this browser.'; else PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(ok=>{status.textContent=ok?'Your device supports secure platform verification.':'A platform authenticator is unavailable on this device.';button.disabled=!ok;});
-button.onclick=async()=>{try{button.disabled=true;status.textContent='Requesting secure device registration…';let r=await fetch('{% url "accounts:webauthn_registration_options" %}',{method:'POST',headers:{'X-CSRFToken':csrf}}),d=await r.json();if(!r.ok)throw Error(d.error);let o=d.publicKey;o.challenge=bytes(o.challenge);o.user.id=bytes(o.user.id);o.excludeCredentials?.forEach(x=>x.id=bytes(x.id));let c=await navigator.credentials.create({publicKey:o});r=await fetch('{% url "accounts:webauthn_registration_verify" %}',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({challenge_id:d.challenge_id,credential:encode(c)})});d=await r.json();if(!r.ok)throw Error(d.error);status.textContent='Device credential registered successfully.';}catch(e){status.textContent=e.name==='NotAllowedError'?'Registration was cancelled or timed out.':(e.message||'Registration could not be completed.');button.disabled=false;}};
+button.onclick=async()=>{try{button.disabled=true;status.textContent='Requesting secure device registration…';let r=await fetch('{% url "accounts:webauthn_registration_options" %}',{method:'POST',headers:{'X-CSRFToken':csrf}}),d=await r.json();if(!r.ok)throw Error(d.error);let o=d.publicKey;o.challenge=bytes(o.challenge);o.user.id=bytes(o.user.id);o.excludeCredentials?.forEach(x=>x.id=bytes(x.id));let c=await navigator.credentials.create({publicKey:o});r=await fetch('{% url "accounts:webauthn_registration_verify" %}',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({challenge_id:d.challenge_id,credential:encode(c)})});d=await r.json();if(!r.ok)throw Error(d.error);panel.hidden=true;success.hidden=false;}catch(e){status.textContent=e.name==='NotAllowedError'?'Registration was cancelled or timed out.':(e.message||'Registration could not be completed.');button.disabled=false;}};
 </script>{% endif %}{% endblock %}

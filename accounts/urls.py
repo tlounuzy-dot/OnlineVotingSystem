@@ -10,6 +10,7 @@ urlpatterns = [
     path("register/success/", views.registration_success, name="registration_success"),
     path("register/verify/", views.registration_verification_method, name="registration_verification_method"),
     path("register/verify/code/", views.registration_verification_code, name="registration_verification_code"),
+    path("register/verify/change-email/", views.registration_email_change, name="registration_email_change"),
     path("register/verify/resend/", views.registration_verification_resend, name="registration_verification_resend"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),

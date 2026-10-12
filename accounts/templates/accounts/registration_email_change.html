@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Change email address | SecureVote{% endblock %}
+{% block content %}
+<section class="auth-page"><div class="auth-shell"><div class="auth-card">
+    <span class="auth-icon" aria-hidden="true">@</span>
+    <h1>Change email address</h1>
+    <p>Update the email for this pending registration. We’ll send a fresh verification code to the new address.</p>
+    <form method="post" class="auth-form">{% csrf_token %}
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="field-group">{{ form.email.label_tag }}{{ form.email }}{% if form.email.errors %}<span class="field-error">{{ form.email.errors }}</span>{% endif %}</div>
+        <button class="button form-submit" type="submit">Update email and send code</button>
+    </form>
+</div></div></section>
+{% endblock %}

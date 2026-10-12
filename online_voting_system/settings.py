@@ -41,7 +41,19 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = [host for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if host]
+def environment_list(name: str) -> list[str]:
+    """Return a comma-separated environment setting without blank values."""
+    return [value.strip().rstrip("/") for value in os.environ.get(name, "").split(",") if value.strip()]
+
+
+ALLOWED_HOSTS = environment_list("DJANGO_ALLOWED_HOSTS")
+CSRF_TRUSTED_ORIGINS = environment_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+
+# Development tunnel mode is explicitly opt-in.  Cloudflare terminates public
+# HTTPS and forwards to the loopback Django listener with X-Forwarded-Proto.
+# Never enable this for an origin that untrusted clients can reach directly.
+if os.environ.get("DJANGO_TRUST_X_FORWARDED_PROTO", "False").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -175,17 +187,6 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 OTP_EXPIRY_SECONDS = int(os.environ.get("OTP_EXPIRY_SECONDS", "300"))
 OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get("OTP_RESEND_COOLDOWN_SECONDS", "60"))
-# Infobip SMS uses the current v3 SMS API.  The documented ServiceSMS sender is
-# suitable for trial accounts only; production deployments must set their own
-# approved sender through the environment.
-INFOBIP_API_BASE_URL = os.environ.get("INFOBIP_API_BASE_URL", "")
-INFOBIP_API_KEY = os.environ.get("INFOBIP_API_KEY", "")
-INFOBIP_SMS_SENDER = os.environ.get("INFOBIP_SMS_SENDER", "ServiceSMS")
-INFOBIP_SMS_TIMEOUT_SECONDS = int(os.environ.get("INFOBIP_SMS_TIMEOUT_SECONDS", "10"))
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_FROM_NUMBER = os.environ.get("TWILIO_WHATSAPP_FROM_NUMBER", "")
-
 # Production must set these to its HTTPS origin and registrable relying-party ID.
 WEBAUTHN_RP_ID = os.environ.get("WEBAUTHN_RP_ID", "localhost")
 WEBAUTHN_RP_NAME = os.environ.get("WEBAUTHN_RP_NAME", "Online Voting System")
@@ -200,5 +201,7 @@ LOGIN_URL = "accounts:login"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
+SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "False").lower() == "true"
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"

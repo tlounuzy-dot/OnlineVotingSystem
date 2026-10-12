@@ -9,6 +9,7 @@
         <button class="button form-submit" type="submit">Verify code</button>
     </form>
     <form method="post" action="{{ resend_url }}" class="resend-form">{% csrf_token %}<button class="text-button" type="submit">Resend code</button></form>
+    {% if change_email_url %}<p class="auth-links"><a href="{{ change_email_url }}">Change email address</a></p>{% endif %}
     <div class="security-note"><span aria-hidden="true">⌁</span><span>For your security, codes are single-use and verification attempts are limited.</span></div>
 </div></div></section>
 {% endblock %}

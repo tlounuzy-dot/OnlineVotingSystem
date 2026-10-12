@@ -118,6 +118,23 @@ class VerificationChannelForm(forms.Form):
         ]
 
 
+class PendingEmailCorrectionForm(forms.Form):
+    email = forms.EmailField(label="New email address")
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        matches = User.objects.filter(email__iexact=email)
+        if self.user:
+            matches = matches.exclude(pk=self.user.pk)
+        if matches.exists():
+            raise ValidationError("That email address cannot be used. Please enter another address.")
+        return email
+
+
 class OTPCodeForm(forms.Form):
     code = forms.CharField(
         label="Six-digit verification code",

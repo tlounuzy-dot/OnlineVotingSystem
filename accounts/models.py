@@ -330,7 +330,7 @@ class ContactVerificationCode(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.get_purpose_display()} via {self.get_channel_display()} for user {self.user_id}"
+        return f"{self.get_purpose_display()} via email for user {self.user_id}"
 
 
 class SMSDeliveryMetadata(models.Model):

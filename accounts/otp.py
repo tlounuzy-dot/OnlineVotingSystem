@@ -112,16 +112,14 @@ def issue_code(user, purpose: str, channel: str) -> tuple[ContactVerificationCod
             expires_at=now + timedelta(seconds=settings.OTP_EXPIRY_SECONDS),
         )
     try:
-        submission = send_otp(channel, destination, code, purpose)
+        send_otp(channel, destination, code, purpose)
     except Exception as exc:
         # Keep operational diagnostics useful without logging the recipient,
         # OTP, provider request URL, or credential material.
         logger.warning(
-            "OTP delivery provider failure: channel=%s error_type=%s error_code=%s http_status=%s",
+            "OTP delivery provider failure: channel=%s error_type=%s",
             channel,
             type(exc).__name__,
-            getattr(exc, "code", None),
-            getattr(exc, "status", None),
         )
         ContactVerificationCode.objects.filter(pk=record.pk, used_at__isnull=True).update(invalidated_at=timezone.now())
         if isinstance(exc, DeliveryUnavailable):

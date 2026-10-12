@@ -30,7 +30,11 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-load_env_file(BASE_DIR / ".env")
+PRODUCTION = os.environ.get("DJANGO_ENV", "development") == "production"
+if os.environ.get("DJANGO_ENV", "development") not in {"development", "production"}:
+    raise ValueError("DJANGO_ENV must be development or production")
+if not PRODUCTION:
+    load_env_file(BASE_DIR / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -181,6 +185,7 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "False").lower() == "true"
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() == "true"
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
 
 # Contact-code security controls. Provider credentials are environment-only and
 # optional in development; email continues to use Django's configured backend.
@@ -205,3 +210,8 @@ SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "False").lower()
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
+
+# Hosted configuration is explicit and fails closed; local settings above remain intact.
+if PRODUCTION:
+    from .production import configure
+    configure(globals(), os.environ)

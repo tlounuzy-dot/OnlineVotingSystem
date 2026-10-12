@@ -44,7 +44,7 @@ def _channel_labels(destinations):
 
 def _delivery_error(user, purpose, channel):
     """Record diagnostics without OTPs, destinations, or provider secrets."""
-    logger.warning("OTP delivery unavailable: user_id=%s purpose=%s channel=%s", user.pk, purpose, channel)
+    logger.warning("OTP delivery unavailable: purpose=%s channel=%s", purpose, channel)
 
 
 def _public_workflow_guard(request):

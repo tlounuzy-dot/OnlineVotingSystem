@@ -1,7 +1,8 @@
 # SecureVote: independent Windows local testing
 
-This guide targets committed application `1012a1fe937f2266cfbf11573a4b6f5517c532b3`.
-Production preparation is separate and uncommitted. Each tester uses their own
+This guide describes the current repository implementation, including the committed
+production configuration and Brevo backend. Record the checked-out Git revision
+when testing. Each tester uses their own
 laptop, secrets, database, mailbox and passkeys. Do not copy the owner's .env,
 database, credentials, voter records or authenticator material.
 
@@ -26,7 +27,7 @@ Official references: [Python Windows](https://www.python.org/downloads/windows/)
 [Django MySQL notes](https://docs.djangoproject.com/en/6.0/ref/databases/#mysql-notes),
 [Windows WebAuthn](https://learn.microsoft.com/en-us/windows/security/identity-protection/hello-for-business/webauthn-apis).
 
-## 2. Clone the exact application revision
+## 2. Clone and record the application revision
 
 Run in a new PowerShell window. Choose a parent folder you own; the following
 uses Documents. Do not run these commands inside an existing project checkout.
@@ -35,18 +36,18 @@ uses Documents. Do not run these commands inside an existing project checkout.
 Set-Location ([Environment]::GetFolderPath('MyDocuments'))
 git clone https://github.com/tlounuzy-dot/OnlineVotingSystem.git SecureVote-local
 Set-Location .\SecureVote-local
-git switch --detach 1012a1fe937f2266cfbf11573a4b6f5517c532b3
 git rev-parse HEAD
 git status --short
 Test-Path .\manage.py
 ```
 
-Expected: the exact hash above, clean status, and True for manage.py. The remote
+Expected: a recorded revision, clean status, and True for manage.py. The remote
 repository root already contains manage.py; do not append a second
-OnlineVotingSystem directory. Detached HEAD deliberately fixes the test revision.
-These two handoff documents are newer than that revision; obtain them separately
-until they are committed, or use the later documentation-only revision agreed by
-the group. Do not run the mobile tunnel launcher for laptop-only testing.
+OnlineVotingSystem directory. For a reproducible group test, agree on a full
+commit SHA and use `git switch --detach <AGREED_COMMIT_SHA>` in the fresh clone.
+Use the documentation and requirements from that revision. The former
+1012a1f-based instructions preceded the committed production/Brevo configuration.
+Do not run the mobile tunnel launcher for laptop-only testing.
 
 ## 3. Create and use a virtual environment
 
@@ -124,12 +125,13 @@ git check-ignore .env
 notepad .env
 ```
 
-The committed example has obsolete INFOBIP/TWILIO entries: remove those from
-your private copy or leave them blank; they are unused. OTP is email-only.
+The current .env.example contains local settings and email-only OTP controls.
+SMS and WhatsApp delivery are not implemented in the current workflow.
 Keep these local settings in .env, replacing the two secret placeholders and
 database password with your own values:
 
 ```dotenv
+DJANGO_ENV=development
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8000
@@ -151,8 +153,7 @@ OTP_RESEND_COOLDOWN_SECONDS=60
 ```
 
 Loopback HTTP uses development cookies; no proxy is involved. This does not
-change hosted security. On a checkout with production preparation, also set
-`DJANGO_ENV=development`. Do not set production mode for this workflow.
+change hosted security. Keep `DJANGO_ENV=development` for this workflow.
 
 To generate and insert secrets directly into this private .env without displaying
 them in the terminal, run the following once after saving the template above:
@@ -201,7 +202,9 @@ Use your provider's documented host/port/security settings. For implicit TLS on
 password when required, and authenticate/verify the sender as your provider
 requires. Keep credentials in .env only. SMTP must support username/password
 authentication; this committed backend does not implement OAuth-only providers.
-The uncommitted Brevo backend is not part of 1012a1f.
+The committed Brevo HTTPS backend is also available locally. For an isolated
+Brevo OTP test, follow [ISOLATED_OTP_TEST.md](ISOLATED_OTP_TEST.md). Hosted
+production requires Brevo; this local guide uses SMTP intentionally.
 
 Register using a mailbox you control (or a provider-supported alias). Synthetic
 identity fields still need a real controlled mailbox for inbox tests. Never send
@@ -271,8 +274,10 @@ Then run:
 ```
 
 Do not use --noinput to replace an existing database. If prompted to delete an
-existing test database, answer no and investigate. Expected at exact 1012a1f:
-94 tests (the later 101-test report includes uncommitted deployment tests).
+existing test database, answer no and investigate. Record the discovered test
+count, checked-out revision and actual outcome; counts depend on the revision.
+Deployment and Brevo tests are now committed. Passing mocked provider tests
+does not establish real inbox delivery or hosted connectivity.
 Never point test settings at an owner's or shared production database.
 
 ## Troubleshooting
@@ -298,9 +303,8 @@ Never point test settings at an owner's or shared production database.
 Report sanitized errors and environment versions. Do not upload .env, database
 dumps, passwords, OTPs, API keys, WebAuthn credential payloads or private keys.
 
-## Sharing only these documents later
+## Recording test evidence
 
-The project owner can stage only LOCAL_SETUP.md and TESTING_CHECKLIST.md and
-inspect `git diff --cached --name-only` and `git diff --cached` before committing.
-Avoid `git add .`, `git add -A` and `git commit -a`, which could include production
-preparation. No commit or push has been performed for this handoff.
+Keep a sanitized test report with the Git revision, environment versions and
+actual results. Review any proposed documentation or evidence changes separately;
+exclude private configuration, database exports, logs containing codes and credentials.

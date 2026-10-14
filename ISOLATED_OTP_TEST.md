@@ -1,30 +1,35 @@
-# Isolated MySQL + Brevo OTP workflow: review before execution
+# Isolated MySQL + Brevo OTP testing
 
-None of the database creation, migration, seeding, server or browser steps below
-have been executed by Codex. The user confirmed receipt of the previous harmless
-Django/Brevo email. This plan verifies real OTP workflows next, with synthetic data.
+Use this procedure to test email OTP delivery and verification with synthetic
+accounts in a separate local MySQL database. The commands create a dedicated
+database/user and later apply migrations only after identity checks. They are
+instructions, not evidence that testing has passed; record actual results.
 
-## Current inspected configuration
+## Configuration and prerequisites
 
-HEAD is 6b6fbc2 (documentation commit); production preparation remains uncommitted.
-Effective settings inspected without a database connection:
+The production configuration and Brevo backend are committed. Record
+`git rev-parse HEAD` before testing and install that revision's requirements.
+Development loads .env using os.environ.setdefault, so explicit process values
+take precedence. Production requires AIVEN_MYSQL_* and does not load .env.
+Never select production mode for this local test.
 
-| Setting | Current value |
+| Setting | Required value for this procedure |
 | --- | --- |
 | Mode | development |
 | Database engine | django.db.backends.mysql |
-| Database name | online_voting_db |
+| Database name | securevote_otp_test |
+| Database user | securevote_otp_tester at localhost |
 | Host / port | 127.0.0.1 / 3306 |
-| Email backend | django.core.mail.backends.smtp.EmailBackend |
+| Email backend | accounts.email_backends.BrevoEmailBackend |
 | Email timeout | 10 seconds |
-| Brevo key in inspected process/settings | absent |
+| Brevo key | Privately supplied transactional API key |
 | WebAuthn RP / origin | localhost / http://localhost:8000 |
 | OTP expiry / attempts / resend cooldown | 300 seconds / 5 / 60 seconds |
 
-Database username/password are configured; their values were not displayed.
-Development loads .env using os.environ.setdefault, so explicit process values
-take precedence. Production instead requires AIVEN_MYSQL_* and does not load .env.
-Never select production mode for this local test.
+Use an existing private development .env prepared through
+[LOCAL_SETUP.md](LOCAL_SETUP.md), with an independent Django secret and Fernet key.
+Do not copy another tester's credentials or database. This procedure overrides
+DB_* and email settings in the dedicated terminal without rewriting .env.
 
 All existing migrations must run on the new empty database, including the legacy
 SMS metadata migration: its existence does not enable SMS. Credential migration
@@ -36,7 +41,7 @@ Requirements: working Python 3.13/Django 6.0.9/PyMySQL/cryptography, local MySQL
 8.4 recommended (Django supports 8.0.11+, but this grant helper requires 8.0.16+
 for partial_revokes), MySQL administrative authority to create one
 database/user, verified Brevo sender/key, and Windows Hello plus current Edge or
-Chrome for platform passkeys. No application-code blocker was found.
+Chrome for platform passkeys. Install dependencies in a dedicated virtual environment.
 
 ## 1. Common terminal preparation
 
@@ -45,7 +50,7 @@ environment, print settings, capture HTTP bodies, or share credentials. Review
 each phase separately before executing it.
 
 ```powershell
-Set-Location 'C:\Users\Admin\Downloads\NPRT PROJECT\OnlineVotingSystem'
+Set-Location '<PATH_TO_YOUR_SECUREVOTE_CHECKOUT>'
 if (-not (Test-Path .\manage.py)) { throw 'Wrong project directory.' }
 $otpPython = if (Test-Path .\.venv\Scripts\python.exe) {
     (Resolve-Path .\.venv\Scripts\python.exe).Path
@@ -72,7 +77,7 @@ Passwords/key briefly exist in process memory to authenticate; no user/machine
 environment setting or .env file is written. Keep your chosen database password
 in your own password manager for future access. Do not generate/replace Brevo keys.
 
-## 2. Explicit database/user creation (user execution only)
+## 2. Create the isolated database and user
 
 Names: database `securevote_otp_test`; account `securevote_otp_tester` at `localhost`.
 Use a new strong dedicated password, not your existing database/admin password.
@@ -147,7 +152,7 @@ the block selects the correct literal grant form for that server setting.
 ## 3. Select isolated DB and Brevo in this terminal only
 
 Use the dedicated password created above. Sender must be the exact bare verified
-Brevo email address. Gmail EMAIL_HOST_* credentials stay untouched and unused.
+Brevo email address. Existing SMTP settings stay untouched and unused.
 The backend uses HTTPS with certificate validation, not SMTP. Local browser access
 remains http://localhost:8000, the existing WebAuthn secure-context exception.
 
@@ -362,4 +367,14 @@ privately with your local MySQL administrator rather than resetting anything.
 Likely blockers: existing database/user names, insufficient admin rights, MySQL
 host-grant mismatch (identity check will stop), unavailable port 3306/8000,
 WhiteNoise/dependency installation, unverified sender or Brevo restrictions, and
-Windows Hello/browser support. No live checks of these prerequisites were executed.
+Windows Hello/browser support. Verify these prerequisites in your own environment.
+
+## Academic attribution and historical validation note
+
+Earlier versions of this guide explicitly recorded assistance from Codex and
+reported receipt of a preliminary Django/Brevo email. That receipt was not a
+completed OTP workflow test. This revision retains that disclosure here while
+separating it from reusable technical instructions; Git history preserves the
+original wording. For an academic submission, retain any required AI assistance
+acknowledgements and document the actual scope of assistance and human validation
+according to the institution's policy. This guide does not establish policy compliance.

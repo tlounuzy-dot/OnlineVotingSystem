@@ -3,7 +3,8 @@
 This prepares the existing system for testing with synthetic accounts. It is not
 a secret-ballot election system: Vote retains voter/candidate relations and IP
 addresses alongside encrypted_choice. Restrict staff access and database access.
-No migrations or local data need changing for this preparation.
+Hosted setup applies the existing migrations to a separate database; it does not
+require changes to migration files or local data.
 
 ## Render
 
@@ -15,8 +16,8 @@ Gunicorn is installed on Linux and intentionally skipped on Windows.
 
 Build: `pip install -r requirements.txt && python manage.py collectstatic --noinput`
 
-The requirements pin Django within the 6.0 series and Gunicorn to verified PyPI
-releases supporting Python 3.13. Revalidate dependency updates in an isolated
+The requirements pin Django to 6.0.9 and Gunicorn to 26.1.0.
+Install the repository requirements using Python 3.13. Revalidate dependency updates in an isolated
 environment before changing pins; do not upgrade to Django 6.1 implicitly.
 
 Start: `gunicorn online_voting_system.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60 --access-logfile /dev/null --error-logfile -`
